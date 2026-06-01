@@ -21,7 +21,8 @@ pip install -e ".[dev]"
 ```
 
 Requires Python ≥ 3.10.  Core dependencies are [Clarabel](https://clarabel.org/), SciPy, and NumPy;
-the `[dev]` extra adds pytest for running the test suite.
+the `[dev]` extra adds pytest for running the test suite;
+the `[tutorial]' extra adds matplotlib, networkx, and jupyter for the tutorial notebooks.
 
 ## Quick example: Mantel's theorem
 
