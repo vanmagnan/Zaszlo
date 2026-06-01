@@ -10,9 +10,11 @@ from fractions import Fraction
 import pytest
 
 from zaszlo import (
+    Certificate,
     FlagProblem,
     Hypergraph,
     build_flag_algebra_data,
+    certify,
     identify_sharps,
     round_certificate,
     solve_sdp,
@@ -58,7 +60,7 @@ class TestMantel:
 
     def test_sharps(self, data, result):
         sharps = identify_sharps(data, result)
-        # Empty graph is always sharp (density 0 ≤ bound)
+        # Empty graph has near-zero slack at optimality (complementary slackness in the SDP)
         assert 0 in sharps.indices
         # At least one sharp graph has density = 1/2 (the extremal K_{n/2,n/2}-like graph)
         assert any(d == Fraction(1, 2) for d in sharps.densities)
@@ -188,3 +190,60 @@ class TestC5Density:
     def test_certificate_psd(self, data, result):
         cert = verify_certificate(data, result)
         assert cert["min_psd_eigval"] >= -1e-5
+
+
+# ---------------------------------------------------------------------------
+# certify(): Certificate object
+# ---------------------------------------------------------------------------
+
+class TestCertify:
+    @pytest.fixture(scope="class")
+    def data(self):
+        k3 = Hypergraph(3, 2, [(1, 2), (1, 3), (2, 3)])
+        prob = FlagProblem(4, 2, 2, forbidden=[k3], minimize=False)
+        return build_flag_algebra_data(prob)
+
+    @pytest.fixture(scope="class")
+    def result(self, data):
+        return solve_sdp(data, extract_Q=True)
+
+    @pytest.fixture(scope="class")
+    def proof(self, result):
+        return certify(result)
+
+    def test_returns_certificate(self, proof):
+        assert isinstance(proof, Certificate)
+
+    def test_bound_is_fraction(self, proof):
+        assert isinstance(proof.bound, Fraction)
+
+    def test_bound_value(self, proof):
+        assert abs(float(proof.bound) - 0.5) < 1e-2
+
+    def test_valid(self, proof):
+        assert proof.valid is True
+
+    def test_q_matrices_count(self, proof):
+        assert proof.Q is not None
+        assert len(proof.Q) == 3  # Mantel has 3 types
+
+    def test_residuals_all_nonneg(self, proof):
+        assert all(r >= 0 for r in proof.residuals)
+
+    def test_residuals_count(self, proof, data):
+        assert len(proof.residuals) == len(data.admissible)
+
+    def test_active_constraints_have_zero_residual(self, proof):
+        ac = proof.active_constraints
+        assert len(ac) > 0
+        for i in ac:
+            assert proof.residuals[i] == Fraction(0)
+
+    def test_explicit_data_argument(self, data, result):
+        proof = certify(result, data)
+        assert proof.valid is True
+
+    def test_raises_without_q_matrices(self, data):
+        result_no_q = solve_sdp(data)
+        with pytest.raises(ValueError):
+            certify(result_no_q)

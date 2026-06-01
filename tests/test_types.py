@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zaszlo import FlagProblem, Hypergraph, complete
+from zaszlo import Flag, FlagProblem, Hypergraph, complete
 
 
 # ---------------------------------------------------------------------------
@@ -109,3 +109,100 @@ class TestFlagProblemValidation:
     def test_size_error_names_n_minus_2(self):
         with pytest.raises(ValueError, match="n-2="):
             FlagProblem(6, 6, 2)
+
+
+# ---------------------------------------------------------------------------
+# Hypergraph constructor validation
+# ---------------------------------------------------------------------------
+
+class TestHypergraphValidation:
+    def test_rejects_wrong_edge_size(self):
+        with pytest.raises(ValueError, match="size"):
+            Hypergraph(3, 2, [(1,)])
+
+    def test_rejects_edge_too_large(self):
+        with pytest.raises(ValueError, match="size"):
+            Hypergraph(3, 2, [(1, 2, 3)])
+
+    def test_rejects_out_of_range_vertex(self):
+        with pytest.raises(ValueError, match="outside"):
+            Hypergraph(3, 2, [(1, 4)])
+
+    def test_rejects_vertex_zero(self):
+        with pytest.raises(ValueError, match="outside"):
+            Hypergraph(3, 2, [(0, 1)])
+
+    def test_rejects_repeated_vertex(self):
+        with pytest.raises(ValueError, match="repeated"):
+            Hypergraph(3, 2, [(1, 1)])
+
+    def test_rejects_negative_n(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            Hypergraph(-1, 2, [])
+
+    def test_rejects_k_zero(self):
+        with pytest.raises(ValueError, match="at least 1"):
+            Hypergraph(3, 0, [])
+
+    def test_allows_empty_edges(self):
+        g = Hypergraph(5, 3, [])
+        assert g.edges == []
+
+    def test_allows_n_zero_empty_edges(self):
+        g = Hypergraph(0, 2, [])
+        assert g.n == 0
+
+
+# ---------------------------------------------------------------------------
+# Flag constructor validation
+# ---------------------------------------------------------------------------
+
+class TestFlagValidation:
+    def test_rejects_type_size_above_n(self):
+        with pytest.raises(ValueError, match="type_size"):
+            Flag(Hypergraph(3, 2, []), 4)
+
+    def test_rejects_negative_type_size(self):
+        with pytest.raises(ValueError, match="type_size"):
+            Flag(Hypergraph(3, 2, []), -1)
+
+    def test_allows_type_size_zero(self):
+        f = Flag(Hypergraph(3, 2, []), 0)
+        assert f.type_size == 0
+
+    def test_allows_type_size_equal_n(self):
+        f = Flag(Hypergraph(3, 2, []), 3)
+        assert f.type_size == 3
+
+
+# ---------------------------------------------------------------------------
+# FlagProblem uniformity validation
+# ---------------------------------------------------------------------------
+
+class TestFlagProblemUniformityValidation:
+    def test_rejects_forbidden_wrong_k(self):
+        bad = Hypergraph(4, 3, [(1, 2, 3)])
+        with pytest.raises(ValueError, match="uniformity"):
+            FlagProblem(4, 2, 2, forbidden=[bad])
+
+    def test_rejects_forbidden_induced_wrong_k(self):
+        bad = Hypergraph(3, 2, [(1, 2)])
+        with pytest.raises(ValueError, match="uniformity"):
+            FlagProblem(5, 3, 3, forbidden_induced=[bad])
+
+    def test_rejects_target_wrong_k(self):
+        c5 = Hypergraph(5, 2, [(1, 2), (2, 3), (3, 4), (4, 5), (5, 1)])
+        with pytest.raises(ValueError, match="uniformity"):
+            FlagProblem(5, 3, 3, target=c5)
+
+    def test_rejects_n_less_than_2(self):
+        with pytest.raises(ValueError, match="at least 2"):
+            FlagProblem(1, 0, 2)
+
+    def test_rejects_k_zero(self):
+        with pytest.raises(ValueError, match="at least 1"):
+            FlagProblem(4, 2, 0)
+
+    def test_allows_matching_k(self):
+        k3 = Hypergraph(3, 2, [(1, 2), (1, 3), (2, 3)])
+        FlagProblem(4, 2, 2, forbidden=[k3])  # should not raise

@@ -151,13 +151,13 @@ def parse_flags_rat(path: str | Path) -> dict[tuple[int, int, int, int], Fractio
     """Parse flags.rat into a lookup dict.
 
     Format per line: H_idx block_idx flag_i flag_j numer denom
-    block_idx = sigma + 1  (block 2 = type sigma=1, 0-based)
+    block_idx starts at 2 in the C output (block 1 is reserved).
 
     Returns
     -------
     dict mapping (H_idx, sigma, i, j) → Fraction
     where H_idx and i, j are 1-based (matching C convention),
-    and sigma is 0-based type index.
+    and sigma is 0-based type index (block_idx - 2).
     """
     result: dict[tuple[int, int, int, int], Fraction] = {}
     for line in Path(path).read_text().splitlines():
@@ -165,6 +165,6 @@ def parse_flags_rat(path: str | Path) -> dict[tuple[int, int, int, int], Fractio
         if len(parts) != 6:
             continue
         H_idx, block, i, j, numer, denom = map(int, parts)
-        sigma = block - 1  # block 2 = type index 1 (1-based) → sigma=1
+        sigma = block - 2  # C blocks start at 2; sigma=0 is the first type
         result[(H_idx, sigma, i, j)] = Fraction(numer, denom)
     return result

@@ -33,6 +33,21 @@ class Hypergraph:
     """
 
     def __init__(self, n: int, k: int, edges: list[tuple[int, ...]]):
+        if n < 0:
+            raise ValueError(f"n must be non-negative, got {n}")
+        if k < 1:
+            raise ValueError(f"k must be at least 1, got {k}")
+        for edge in edges:
+            if len(edge) != k:
+                raise ValueError(
+                    f"edge {edge!r} has size {len(edge)}, expected k={k}"
+                )
+            if len(set(edge)) != k:
+                raise ValueError(f"edge {edge!r} contains repeated vertices")
+            if any(v < 1 or v > n for v in edge):
+                raise ValueError(
+                    f"edge {edge!r} contains a vertex outside 1..{n}"
+                )
         self.n = n
         self.k = k
         # Normalize: sort each edge internally, then sort the edge list.
@@ -92,6 +107,10 @@ class Flag:
     """
 
     def __init__(self, graph: Hypergraph, type_size: int):
+        if not (0 <= type_size <= graph.n):
+            raise ValueError(
+                f"type_size={type_size} must satisfy 0 <= type_size <= graph.n={graph.n}"
+            )
         self.graph = graph
         self.type_size = type_size
 
@@ -194,6 +213,10 @@ class FlagProblem:
         target: Optional[Hypergraph] = None,
         minimize: bool = False,
     ):
+        if n < 2:
+            raise ValueError(f"n must be at least 2, got {n}")
+        if k < 1:
+            raise ValueError(f"k must be at least 1, got {k}")
         if (n - type_order) % 2 != 0:
             valid = list(range(n % 2, n - 1, 2))
             raise ValueError(
@@ -207,6 +230,15 @@ class FlagProblem:
                 f"Types that large would produce flags as large as the admissible "
                 f"graphs (n={n} vertices), making the SDP trivial."
             )
+        patterns = list(forbidden or []) + list(forbidden_induced or [])
+        if target is not None:
+            patterns.append(target)
+        for pat in patterns:
+            if pat.k != k:
+                raise ValueError(
+                    f"All forbidden and target hypergraphs must have uniformity k={k}; "
+                    f"got {pat!r} with k={pat.k}"
+                )
         self.n = n
         self.type_order = type_order
         self.k = k
@@ -434,6 +466,83 @@ class SharpsResult:
     def _repr_html_(self) -> str:
         from .explain import html_sharps
         return html_sharps(self)
+
+    def _repr_mimebundle_(self, include=None, exclude=None, **kwargs) -> dict:
+        bundle = {"text/html": self._repr_html_(), "text/plain": repr(self)}
+        if include:
+            bundle = {k: v for k, v in bundle.items() if k in include}
+        if exclude:
+            bundle = {k: v for k, v in bundle.items() if k not in exclude}
+        return bundle
+
+
+# ---------------------------------------------------------------------------
+# Certificate
+# ---------------------------------------------------------------------------
+
+class Certificate:
+    """Exact rational certificate for a flag algebra bound.
+
+    Produced by :func:`certify`. Consolidates the rounded PSD matrices,
+    exact certified bound, per-graph residuals, and validity status in one
+    object.
+
+    Attributes
+    ----------
+    problem:
+        The originating FlagProblem.
+    bound:
+        Exact certified bound as a Fraction.
+    valid:
+        True iff all residuals are ≥ 0 (Q is PSD by construction).
+    Q:
+        Exact rational PSD matrices, one per type.
+    residuals:
+        Exact rational residual for each admissible graph.
+    data:
+        The originating FlagAlgebraData; used by explain() to name graphs.
+
+    Properties
+    ----------
+    active_constraints:
+        Indices of admissible graphs where the certificate identity is exactly
+        tight (residual == 0).  These are the graphs where the sum-of-squares
+        identity has no slack; they constrain the bound.
+    """
+
+    def __init__(
+        self,
+        problem: "FlagProblem",
+        bound: Fraction,
+        valid: bool,
+        Q: list[list[list[Fraction]]],
+        residuals: list[Fraction],
+        data: Optional["FlagAlgebraData"] = None,
+    ):
+        self.problem = problem
+        self.bound = bound
+        self.valid = valid
+        self.Q = Q
+        self.residuals = residuals
+        self.data = data
+
+    @property
+    def active_constraints(self) -> list[int]:
+        """Admissible graph indices where the certificate identity is exactly tight."""
+        return [i for i, r in enumerate(self.residuals) if r == Fraction(0)]
+
+    def __repr__(self) -> str:
+        status = "valid" if self.valid else "INVALID"
+        return f"Certificate  bound={self.bound}  [{status}]"
+
+    def explain(self) -> str:
+        """Return a plain-text description of this certificate."""
+        from .explain import explain_certificate
+        return explain_certificate(self)
+
+    def _repr_html_(self) -> str:
+        from .explain import html_certificate
+        return html_certificate(self)
 
     def _repr_mimebundle_(self, include=None, exclude=None, **kwargs) -> dict:
         bundle = {"text/html": self._repr_html_(), "text/plain": repr(self)}

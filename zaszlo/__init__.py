@@ -13,7 +13,7 @@ The main entry points are:
 
 Quick start::
 
-    from zaszlo import complete, FlagProblem, build_flag_algebra_data, solve_sdp
+    from zaszlo import complete, certify, FlagProblem, build_flag_algebra_data, solve_sdp
 
     # Mantel's theorem: max edge density in triangle-free graphs = 1/2
     # type_order = n - 2 is the recommended choice for the tightest bound at a given n
@@ -21,13 +21,18 @@ Quick start::
     data = build_flag_algebra_data(prob)
     result = solve_sdp(data, extract_Q=True)
     print(result.bound)          # ≈ 0.5
-    print(result.explain())      # plain-text summary of the result
+
+    proof = certify(result)      # round + verify in one step; returns a Certificate
+    print(proof.bound)           # Fraction(1, 2) — exact certified bound
+    print(proof.valid)           # True
+    print(proof.explain())       # plain-text proof summary
 
     # Turán's theorem: max edge density in K₄-free graphs = 2/3
     prob = FlagProblem(5, 3, 2, forbidden=[complete(4)])
     data = build_flag_algebra_data(prob)
     result = solve_sdp(data, extract_Q=True)
-    print(result.bound)          # ≈ 0.6667
+    proof = certify(result)
+    print(proof.bound)           # ≈ Fraction(2, 3)
 """
 
 from .types import (
@@ -37,13 +42,14 @@ from .types import (
     FlagAlgebraData,
     FlagAlgebraResult,
     SharpsResult,
+    Certificate,
     complete,
     k4_minus,
     c5_3uniform,
     f32,
 )
 from .pipeline import build_flag_algebra_data
-from .sdp import build_sdp, solve_sdp, verify_certificate, identify_sharps, round_certificate
+from .sdp import build_sdp, solve_sdp, verify_certificate, identify_sharps, round_certificate, certify
 
 __all__ = [
     "Hypergraph",
@@ -52,6 +58,7 @@ __all__ = [
     "FlagAlgebraData",
     "FlagAlgebraResult",
     "SharpsResult",
+    "Certificate",
     "complete",
     "k4_minus",
     "c5_3uniform",
@@ -62,4 +69,5 @@ __all__ = [
     "verify_certificate",
     "identify_sharps",
     "round_certificate",
+    "certify",
 ]

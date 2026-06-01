@@ -68,9 +68,9 @@ class TestK2N4:
                 for i in range(1, nf + 1):
                     for j in range(i, nf + 1):
                         our_val = pair_dens[sigma][i - 1][j - 1]
-                        ref_val = rat.get((Hi, sigma + 1, i, j), Fraction(0))
+                        ref_val = rat.get((Hi, sigma, i, j), Fraction(0))
                         assert our_val == ref_val, (
-                            f"H={Hi}, sigma={sigma+1}, i={i}, j={j}: "
+                            f"H={Hi}, sigma={sigma}, i={i}, j={j}: "
                             f"got {our_val}, expected {ref_val}"
                         )
 
@@ -118,8 +118,8 @@ class TestK3N5:
                 for i in range(1, nf + 1):
                     for j in range(i, nf + 1):
                         our_val = pair_dens[sigma][i - 1][j - 1]
-                        ref_val = rat.get((Hi, sigma + 1, i, j), Fraction(0))
+                        ref_val = rat.get((Hi, sigma, i, j), Fraction(0))
                         assert our_val == ref_val, (
-                            f"H={Hi}, sigma={sigma+1}, i={i}, j={j}: "
+                            f"H={Hi}, sigma={sigma}, i={i}, j={j}: "
                             f"got {our_val}, expected {ref_val}"
                         )

@@ -14,6 +14,7 @@ from zaszlo import (
     FlagProblem,
     Hypergraph,
     build_flag_algebra_data,
+    certify,
     solve_sdp,
 )
 
@@ -32,6 +33,11 @@ def mantel_data():
 @pytest.fixture(scope="module")
 def mantel_result(mantel_data):
     return solve_sdp(mantel_data, extract_Q=True)
+
+
+@pytest.fixture(scope="module")
+def mantel_proof(mantel_result):
+    return certify(mantel_result)
 
 
 # ---------------------------------------------------------------------------
@@ -434,3 +440,47 @@ class TestFlagAlgebraResultHtml:
         result = FlagAlgebraResult(prob, "optimal", 0.5, None, [])
         html = result._repr_html_()
         assert "extract_Q" in html or "not extracted" in html.lower()
+
+
+# ---------------------------------------------------------------------------
+# Certificate
+# ---------------------------------------------------------------------------
+
+class TestCertificateExplain:
+    def test_explain_returns_string(self, mantel_proof):
+        assert isinstance(mantel_proof.explain(), str)
+
+    def test_explain_contains_bound(self, mantel_proof):
+        text = mantel_proof.explain()
+        assert str(mantel_proof.bound) in text
+
+    def test_explain_contains_valid(self, mantel_proof):
+        assert "valid" in mantel_proof.explain().lower()
+
+    def test_explain_contains_active_constraints(self, mantel_proof):
+        assert "active constraint" in mantel_proof.explain().lower()
+
+    def test_explain_sum_of_squares_language(self, mantel_proof):
+        assert "sum-of-squares" in mantel_proof.explain().lower()
+
+    def test_explain_no_entrywise_claim(self, mantel_proof):
+        assert "entry-wise" not in mantel_proof.explain()
+
+    def test_html_returns_string(self, mantel_proof):
+        assert isinstance(mantel_proof._repr_html_(), str)
+
+    def test_html_is_html(self, mantel_proof):
+        assert "<" in mantel_proof._repr_html_()
+
+    def test_html_contains_bound(self, mantel_proof):
+        assert str(mantel_proof.bound) in mantel_proof._repr_html_()
+
+    def test_mimebundle_has_both_keys(self, mantel_proof):
+        bundle = mantel_proof._repr_mimebundle_()
+        assert "text/html" in bundle
+        assert "text/plain" in bundle
+
+    def test_repr_shows_bound_and_status(self, mantel_proof):
+        r = repr(mantel_proof)
+        assert str(mantel_proof.bound) in r
+        assert "valid" in r.lower()

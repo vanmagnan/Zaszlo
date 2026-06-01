@@ -33,7 +33,7 @@ the `[tutorial]` extra adds matplotlib, networkx, and jupyter for the tutorial n
 The maximum edge density in a triangle-free graph is 1/2 (Mantel, 1907).
 
 ```python
-from zaszlo import FlagProblem, Hypergraph, build_flag_algebra_data, solve_sdp, verify_certificate
+from zaszlo import FlagProblem, Hypergraph, build_flag_algebra_data, solve_sdp, certify
 
 K3 = Hypergraph(3, 2, [(1, 2), (1, 3), (2, 3)])
 
@@ -47,9 +47,10 @@ prob = FlagProblem(
 
 data   = build_flag_algebra_data(prob)
 result = solve_sdp(data, extract_Q=True)
-cert   = verify_certificate(data, result)
+proof  = certify(result)        # round + verify; returns a Certificate
 
-print(cert["lam_certified"])   # 1/2
+print(proof.valid)              # True
+print(proof.bound)              # Fraction(1, 2) — exact certified bound
 ```
 
 For a step-by-step walkthrough — including rational certificates, the pentagon problem, and

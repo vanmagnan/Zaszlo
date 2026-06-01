@@ -28,7 +28,7 @@ import clarabel
 import numpy as np
 import scipy.sparse as sp
 
-from .types import FlagAlgebraData, FlagAlgebraResult, FlagProblem, SharpsResult
+from .types import Certificate, FlagAlgebraData, FlagAlgebraResult, FlagProblem, SharpsResult
 
 _SQRT2 = math.sqrt(2.0)
 
@@ -514,4 +514,71 @@ def identify_sharps(
         graphs=[data.admissible[i] for i in indices],
         densities=[data.densities[i] for i in indices],
         residuals=cert["residuals"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Certified proof workflow
+# ---------------------------------------------------------------------------
+
+def certify(
+    result: FlagAlgebraResult,
+    data: Optional[FlagAlgebraData] = None,
+    *,
+    denom_limit: int = 1000,
+    chol_reg: float = 1e-10,
+) -> Certificate:
+    """Round and verify a flag algebra certificate in one call.
+
+    Combines :func:`round_certificate` and :func:`verify_certificate` into a
+    single step that returns a :class:`Certificate` with an exact rational
+    bound, PSD matrices, per-graph residuals, and validity status.
+
+    Parameters
+    ----------
+    result:
+        SDP result with Q matrices (``solve_sdp(extract_Q=True)`` required).
+    data:
+        Precomputed flag algebra data.  If ``None``, uses ``result.data``
+        (set automatically by :func:`solve_sdp`).
+    denom_limit:
+        Maximum denominator used when rounding each entry of the Cholesky
+        factor.  Passed to :func:`round_certificate`.
+    chol_reg:
+        Diagonal regularization before Cholesky decomposition.  Passed to
+        :func:`round_certificate`.
+
+    Returns
+    -------
+    Certificate
+        Exact rational certificate ready for inspection, verification, and
+        sharing.
+
+    Examples
+    --------
+    ::
+
+        result = solve_sdp(data, extract_Q=True)
+        proof  = certify(result)
+
+        print(proof.bound)   # Fraction(1, 2)
+        print(proof.valid)   # True
+        proof.explain()
+    """
+    if data is None:
+        data = result.data
+    if data is None:
+        raise ValueError(
+            "No data attached to result — pass data explicitly or use solve_sdp, "
+            "which attaches it automatically."
+        )
+    rounded = round_certificate(data, result, denom_limit=denom_limit, chol_reg=chol_reg)
+    cert_dict = verify_certificate(data, rounded)
+    return Certificate(
+        problem=data.problem,
+        bound=cert_dict["lam_certified"],
+        valid=cert_dict["valid"],
+        Q=rounded.Q_exact,
+        residuals=cert_dict["residuals"],
+        data=data,
     )

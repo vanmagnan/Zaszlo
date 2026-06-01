@@ -25,7 +25,7 @@ from math import comb
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from .types import Flag, FlagAlgebraData, FlagAlgebraResult, FlagProblem, Hypergraph, SharpsResult
+    from .types import Certificate, Flag, FlagAlgebraData, FlagAlgebraResult, FlagProblem, Hypergraph, SharpsResult
 
 _SHARP_TOL = 1e-4
 
@@ -357,13 +357,14 @@ def explain_data(d) -> str:
         f"  Admissible graphs: {len(d.admissible)}  (objects whose densities are bounded)",
         f"  Density range:     [{dmin:.4f}, {dmax:.4f}]",
         "",
-        "This is the input to the SDP solver. The solver will search for PSD",
+        "This is the input to the SDP solver. The solver searches for PSD",
         "matrices Q_σ (one per type σ) satisfying, for every admissible H:",
         "",
-        "  bound − density(H)  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)  ≥  0",
+        "  bound − density(H)  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)",
         "",
-        "Since Q_σ ≽ 0 and P_σ(H) ≥ 0 entry-wise, this certifies the bound",
-        "for all admissible graphs simultaneously.",
+        "The PSD matrices Q_σ define a flag-algebra sum-of-squares expression.",
+        "Together with the verified coefficient inequalities over admissible",
+        "graphs, this yields the stated bound.",
         "",
         "  Admissible graphs — the feasible graphs on n vertices; the SDP",
         "    bounds their density.  Forbidden subgraphs have already been",
@@ -435,14 +436,14 @@ def explain_result(r) -> str:
         "",
     ]
 
-    # --- Sharp (extremal) graphs ---
+    # --- Sharp graphs (active constraints) ---
     sharps = _sharp_indices(r)
-    lines.append("Sharp (extremal) graphs:")
+    lines.append("Sharp graphs (active constraints):")
     if sharps:
         lines += [
-            f"  {len(sharps)} graph(s) achieve the bound with slack ≈ 0.",
-            "  These are the extremal configurations — graphs that saturate the bound",
-            "  and show it cannot be tightened without additional constraints.",
+            f"  {len(sharps)} graph(s) with near-zero SDP slack.",
+            "  These graphs have tight certificate constraints. Note: zero slack",
+            "  does not by itself mean a graph attains the density bound.",
         ]
         if r.data is not None:
             lines.append("")
@@ -477,12 +478,13 @@ def explain_result(r) -> str:
             f"    {lhs}  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)",
             "",
             "  where:",
-            "    P_σ(H) — pair density matrix of H over type σ (entry-wise ≥ 0)",
+            "    P_σ(H) — pair density matrix of H over type σ",
             "    Q_σ    — PSD certificate matrix (one per type, found by SDP)",
             "    ⟨A, B⟩ — matrix inner product  Σ_{ij} A_{ij} B_{ij}",
             "",
-            "  Since Q_σ ≽ 0 and P_σ(H) ≥ 0 entry-wise, every term is ≥ 0,",
-            f"  so density(H) {ineq} bound for all admissible H.",
+            "  The PSD matrices Q_σ define a flag-algebra sum-of-squares expression.",
+            "  Together with the verified coefficient inequalities over admissible",
+            "  graphs, this yields the stated bound.",
             "",
         ]
 
@@ -526,11 +528,11 @@ def explain_sharps(s: "SharpsResult") -> str:
     lines = [
         f"SharpsResult  (n={s.problem.n}, k={s.problem.k})",
         "",
-        f"{len(s.indices)} sharp (extremal) graph(s) found.",
+        f"{len(s.indices)} sharp graph(s) found.",
         "",
-        "A graph is sharp when its density exactly meets the bound — slack = 0.",
-        "Sharp graphs are the extremal configurations: they show the bound is tight",
-        "and cannot be improved without changing the problem constraints.",
+        "A graph is sharp when its SDP slack is near zero — the certificate",
+        "constraint is tight at that graph. Zero slack does not imply the graph",
+        "attains the density bound; that is a separate (extremal) condition.",
         "",
         "The residual is the exact rational value of",
         f"  {lhs} − Σ_σ ⟨Q_σ, P_σ(H)⟩",
@@ -580,7 +582,7 @@ def html_sharps(s: "SharpsResult") -> str:
     meta = f"{len(s.indices)} sharp graph(s) · n={s.problem.n}, k={s.problem.k}"
     body = (
         f"<div style='color:#666; font-size:12px; margin-bottom:6px;'>"
-        f"Extremal configurations (tight against the {bound_word} bound):</div>"
+        f"Sharp graphs — active certificate constraints ({bound_word}-bound problem):</div>"
         f"{cards_html}"
     )
     return _card("SharpsResult", meta, body)
@@ -636,3 +638,94 @@ def html_result(r) -> str:
         f"{q_html}"
     )
     return _card("FlagAlgebraResult", f"k={r.problem.k}, n={r.problem.n}", body)
+
+
+# ---------------------------------------------------------------------------
+# Certificate
+# ---------------------------------------------------------------------------
+
+def explain_certificate(c: "Certificate") -> str:
+    bound_kind = "lower" if c.problem.minimize else "upper"
+    status = "VALID" if c.valid else "INVALID"
+
+    lines = [
+        f"Certificate  [{status}]  ({bound_kind} bound)",
+        "",
+        f"  Certified bound : {c.bound}  =  {float(c.bound):.8f}",
+        f"  Valid           : {c.valid}",
+        f"  Admissible graphs: {len(c.residuals)}",
+        "",
+        "The PSD matrices Q_σ define a flag-algebra sum-of-squares expression.",
+        "Together with the verified coefficient inequalities over admissible",
+        "graphs, this yields the stated bound.",
+        "",
+    ]
+
+    # Active constraints
+    ac = c.active_constraints
+    lines.append(f"Active constraints — {len(ac)} graph(s) with residual = 0:")
+    if ac:
+        for i in ac:
+            if c.data is not None:
+                g = c.data.admissible[i]
+                d = c.data.densities[i]
+                lines.append(f"  [{i}]  {g}   density = {d}")
+            else:
+                lines.append(f"  [{i}]")
+    else:
+        lines.append("  none")
+    lines.append("")
+
+    # Q matrices
+    lines.append(f"PSD certificate matrices ({len(c.Q)} total, one per type):")
+    for i, Q in enumerate(c.Q):
+        n = len(Q)
+        lines.append(f"  Q[{i}]  {n}×{n}  (rational entries, PSD by construction)")
+
+    if not c.valid:
+        min_res = min(c.residuals)
+        worst = c.residuals.index(min_res)
+        lines += [
+            "",
+            "Certificate is INVALID.",
+            f"  Minimum residual : {min_res}",
+            f"  Worst graph index: {worst}",
+        ]
+        if c.data is not None:
+            lines.append(f"  Worst graph      : {c.data.admissible[worst]}")
+
+    return "\n".join(lines)
+
+
+def html_certificate(c: "Certificate") -> str:
+    bound_kind = "lower bound" if c.problem.minimize else "upper bound"
+    valid_color = "#2a9d5c" if c.valid else "#c0392b"
+    valid_label = "valid" if c.valid else "INVALID"
+
+    ac = c.active_constraints
+
+    def _graph_items(indices):
+        if not indices:
+            return "<span style='color:#aaa;'>none</span>"
+        if c.data is not None:
+            items = "".join(
+                f"<li>[{i}] {c.data.admissible[i]}"
+                + f" &nbsp; density={c.data.densities[i]}"
+                + "</li>"
+                for i in indices
+            )
+        else:
+            items = "".join(f"<li>index {i}</li>" for i in indices)
+        return f"<ul style='margin:2px 0 2px 16px;'>{items}</ul>"
+
+    q_sizes = ", ".join(str(len(Q)) for Q in c.Q)
+    body = (
+        f"<div style='font-size:26px; font-weight:bold; color:{valid_color}; margin:6px 0;'>"
+        f"{c.bound} &nbsp;"
+        f"<span style='font-size:14px;'>[{valid_label}]</span></div>"
+        f"<div style='color:#888; font-size:12px; margin-bottom:8px;'>"
+        f"{bound_kind} &nbsp;·&nbsp; "
+        f"Q matrices: {len(c.Q)} ({q_sizes})</div>"
+        f"<b>Active constraints</b> ({len(ac)}):{_graph_items(ac)}"
+    )
+    return _card("Certificate", f"k={c.problem.k}, n={c.problem.n}", body)
