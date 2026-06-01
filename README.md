@@ -17,12 +17,16 @@ bound — zászló enumerates combinatorial structures, builds and solves a semi
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+git clone https://github.com/vanmagnan/zaszlo.git
+cd zaszlo
+pip install -e ".[dev]"           # development + tests
+pip install -e ".[tutorial]"      # tutorial notebooks
+pip install -e ".[dev,tutorial]"  # everything
 ```
 
 Requires Python ≥ 3.10.  Core dependencies are [Clarabel](https://clarabel.org/), SciPy, and NumPy;
 the `[dev]` extra adds pytest for running the test suite;
-the `[tutorial]' extra adds matplotlib, networkx, and jupyter for the tutorial notebooks.
+the `[tutorial]` extra adds matplotlib, networkx, and jupyter for the tutorial notebooks.
 
 ## Quick example: Mantel's theorem
 
