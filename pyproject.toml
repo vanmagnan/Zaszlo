@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zaszlo"
+version = "0.1.0"
+description = "Flag algebra method for extremal combinatorics"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "clarabel",
+    "scipy",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/vanmagnan/zaszlo"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zaszlo*"]
