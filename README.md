@@ -1,10 +1,6 @@
 # Zászló
 
-A Python library implementing the **flag algebra method** for extremal combinatorics.
-
-Given a problem specification — which subgraphs are forbidden, which pattern density to
-bound — zászló enumerates combinatorial structures, builds and solves a semidefinite program
-(SDP), and verifies the resulting certificate in exact rational arithmetic.
+A Python library for flag algebra computations in extremal combinatorics. It supports graphs and uniform hypergraphs through a single interface, compiles problem specifications into semidefinite programs, and turns numerical solutions into exact rational certificates that can be independently verified.
 
 ## Tutorials
 
@@ -50,7 +46,7 @@ result = solve_sdp(data, extract_Q=True)
 proof  = certify(result)        # round + verify; returns a Certificate
 
 print(proof.valid)              # True
-print(proof.bound)              # Fraction(1, 2) — exact certified bound
+print(proof.bound)              # a Fraction close to but slightly above 1/2
 ```
 
 For a step-by-step walkthrough — including rational certificates, the pentagon problem, and

@@ -23,7 +23,7 @@ Quick start::
     print(result.bound)          # ≈ 0.5
 
     proof = certify(result)      # round + verify in one step; returns a Certificate
-    print(proof.bound)           # Fraction(1, 2) — exact certified bound
+    print(proof.bound)           # a Fraction close to but slightly above 1/2
     print(proof.valid)           # True
     print(proof.explain())       # plain-text proof summary
 
