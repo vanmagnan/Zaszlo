@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+tutorial = ["matplotlib", "networkx", "jupyter"]
 
 [project.urls]
 Repository = "https://github.com/vanmagnan/zaszlo"
