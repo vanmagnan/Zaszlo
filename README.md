@@ -1,9 +1,9 @@
-# zaszlo
+# Zászló
 
 A Python library implementing the **flag algebra method** for extremal combinatorics.
 
 Given a problem specification — which subgraphs are forbidden, which pattern density to
-bound — zaszlo enumerates combinatorial structures, builds and solves a semidefinite program
+bound — zászló enumerates combinatorial structures, builds and solves a semidefinite program
 (SDP), and verifies the resulting certificate in exact rational arithmetic.
 
 ## Tutorials
@@ -58,7 +58,7 @@ pytest tests/ -v
 
 ## Solver
 
-zaszlo uses [Clarabel](https://clarabel.org/) directly as its SDP solver.  For fine-grained
+zászló uses [Clarabel](https://clarabel.org/) directly as its SDP solver.  For fine-grained
 control over tolerances or iteration limits, pass a `clarabel.DefaultSettings` instance:
 
 ```python
