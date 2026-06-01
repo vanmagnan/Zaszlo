@@ -280,6 +280,15 @@ class FlagAlgebraData:
         self.densities = densities
         self.pair_dens = pair_dens  # pair_dens[H_idx][sigma] = 2D list of Fraction
 
+    def __repr__(self) -> str:
+        flag_counts = [len(fs) for fs in self.flags]
+        return (
+            f"FlagAlgebraData("
+            f"types={len(self.types)}, "
+            f"flags={flag_counts}, "
+            f"admissible={len(self.admissible)})"
+        )
+
     def explain(self) -> str:
         """Return a plain-text explanation of this pre-SDP data for learning."""
         from .explain import explain_data
@@ -318,15 +327,10 @@ class FlagAlgebraResult:
         extracted.
     slacks:
         Primal slack per admissible graph (0.0 = sharp/extremal).
-
-    Notes
-    -----
-    In Jupyter, results render automatically as HTML summary cards.  Pass the
-    originating ``FlagAlgebraData`` to ``explain()`` or ``_repr_html_()`` for
-    richer output that names the sharp (extremal) graphs::
-
-        print(result.explain(data=data))   # names sharp graphs in plain text
-        result._repr_html_(data=data)      # richer HTML card in a notebook
+    data:
+        The originating FlagAlgebraData. Set automatically by solve_sdp and
+        propagated through round_certificate; used by explain() and
+        _repr_html_() to name sharp graphs and show densities.
     """
 
     def __init__(
@@ -339,6 +343,7 @@ class FlagAlgebraResult:
         cholesky_factors: Optional[list[np.ndarray]] = None,
         Q_exact: Optional[list[list[list[Fraction]]]] = None,
         bound_exact: Optional[Fraction] = None,
+        data: Optional["FlagAlgebraData"] = None,
     ):
         """Store the output of solve_sdp. Constructed internally; not called directly."""
         self.problem = problem
@@ -349,6 +354,7 @@ class FlagAlgebraResult:
         self.cholesky_factors = cholesky_factors
         self.Q_exact = Q_exact
         self.bound_exact = bound_exact
+        self.data = data
 
     def __repr__(self) -> str:
         q_desc = "not extracted" if self.Q is None else f"{len(self.Q)} matrices"
@@ -360,29 +366,14 @@ class FlagAlgebraResult:
             f"  Q      : {q_desc}{l_desc}"
         )
 
-    def explain(self, data=None) -> str:
-        """Return a plain-text explanation of this result for learning.
-
-        Parameters
-        ----------
-        data:
-            Optional FlagAlgebraData from the same problem. When provided,
-            sharp graphs are shown with their actual structure and densities.
-        """
+    def explain(self) -> str:
+        """Return a plain-text explanation of this result."""
         from .explain import explain_result
-        return explain_result(self, data=data)
+        return explain_result(self)
 
-    def explain_certificate(self) -> str:
-        """Explain the SDP sum-of-squares certificate and Q matrix properties.
-
-        Raises ValueError if Q matrices were not extracted (extract_Q=True).
-        """
-        from .explain import explain_certificate
-        return explain_certificate(self)
-
-    def _repr_html_(self, data=None) -> str:
+    def _repr_html_(self) -> str:
         from .explain import html_result
-        return html_result(self, data=data)
+        return html_result(self)
 
     def _repr_mimebundle_(self, include=None, exclude=None, **kwargs) -> dict:
         bundle = {"text/html": self._repr_html_(), "text/plain": repr(self)}

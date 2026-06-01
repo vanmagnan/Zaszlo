@@ -329,7 +329,6 @@ class TestFlagAlgebraResultExplain:
 
     def test_contains_bound(self, mantel_result):
         text = mantel_result.explain()
-        # Bound should be close to 0.5
         assert "0.5" in text or "0.50" in text
 
     def test_contains_status(self, mantel_result):
@@ -339,51 +338,57 @@ class TestFlagAlgebraResultExplain:
         text = mantel_result.explain().lower()
         assert "upper" in text or "lower" in text
 
-    def test_with_data_shows_graphs(self, mantel_result, mantel_data):
-        text = mantel_result.explain(data=mantel_data)
+    def test_contains_proof_claim(self, mantel_result):
+        text = mantel_result.explain()
+        assert "proof claim" in text.lower() or "proves" in text.lower() or "certif" in text.lower()
+
+    def test_with_data_shows_graphs(self, mantel_result):
+        # data is stored on the result automatically by solve_sdp
+        text = mantel_result.explain()
         assert isinstance(text, str)
-        # Sharp graphs should be described with their structure
         assert "hypergraph" in text.lower() or "density" in text.lower()
 
-    def test_without_data_shows_indices(self, mantel_result):
-        text = mantel_result.explain()
-        assert "indices" in text.lower() or "index" in text.lower() or "[" in text
-
-    def test_q_matrices_mentioned(self, mantel_result):
-        assert "Q" in mantel_result.explain()
-
-    def test_no_q_says_so(self):
+    def test_without_data_shows_indices(self):
         prob = FlagProblem(4, 2, 2)
         result = FlagAlgebraResult(prob, "optimal", 0.5, None, [0.0, 0.1])
-        assert "not extracted" in result.explain() or "extract_Q" in result.explain()
+        text = result.explain()
+        assert "indices" in text.lower() or "index" in text.lower() or "[" in text
 
+    # Certificate content is now part of explain() when Q matrices are present.
 
-class TestFlagAlgebraResultExplainCertificate:
-    def test_returns_string(self, mantel_result):
-        assert isinstance(mantel_result.explain_certificate(), str)
-
-    def test_contains_q_matrices(self, mantel_result):
-        text = mantel_result.explain_certificate()
-        assert "Q[0]" in text
-
-    def test_contains_eigenvalue_info(self, mantel_result):
-        text = mantel_result.explain_certificate()
-        assert "eigenvalue" in text.lower()
-
-    def test_contains_identity_description(self, mantel_result):
-        text = mantel_result.explain_certificate()
+    def test_certificate_identity_in_explain(self, mantel_result):
+        text = mantel_result.explain()
         assert "P_σ" in text or "Q_σ" in text
 
-    def test_q_sizes_listed(self, mantel_result):
-        text = mantel_result.explain_certificate()
-        # Mantel has 3 types with flag counts [2, 4, 3]
-        assert "2\xd72" in text or "4\xd74" in text or "3\xd73" in text
+    def test_certificate_q_table_in_explain(self, mantel_result):
+        text = mantel_result.explain()
+        assert "Q[0]" in text
 
-    def test_raises_without_q(self):
+    def test_certificate_eigenvalues_in_explain(self, mantel_result):
+        text = mantel_result.explain()
+        assert "eigenvalue" in text.lower()
+
+    def test_certificate_q_sizes_in_explain(self, mantel_result):
+        # Mantel has 3 types with flag counts [2, 4, 3]
+        text = mantel_result.explain()
+        assert "2×2" in text or "4×4" in text or "3×3" in text
+
+    def test_no_q_prompts_extract(self):
+        prob = FlagProblem(4, 2, 2)
+        result = FlagAlgebraResult(prob, "optimal", 0.5, None, [0.0, 0.1])
+        text = result.explain()
+        assert "extract_Q" in text or "not extracted" in text.lower()
+
+    def test_no_q_includes_preview(self):
         prob = FlagProblem(4, 2, 2)
         result = FlagAlgebraResult(prob, "optimal", 0.5, None, [])
-        with pytest.raises(ValueError, match="extract_Q"):
-            result.explain_certificate()
+        text = result.explain()
+        # Should preview what the certificate contains, not just a one-liner
+        assert "psd" in text.lower() or "Q_σ" in text or "sum-of-squares" in text.lower() or "rational" in text.lower()
+
+    def test_sharp_explanation_present(self, mantel_result):
+        text = mantel_result.explain().lower()
+        assert "extremal" in text or "tight" in text or "saturate" in text
 
 
 class TestMimebundleOtherTypes:
@@ -419,8 +424,8 @@ class TestFlagAlgebraResultHtml:
         html = mantel_result._repr_html_()
         assert "0.5" in html or "0.50" in html
 
-    def test_with_data(self, mantel_result, mantel_data):
-        html = mantel_result._repr_html_(data=mantel_data)
+    def test_with_data(self, mantel_result):
+        html = mantel_result._repr_html_()
         assert "<" in html
         assert "density" in html.lower()
 

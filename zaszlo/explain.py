@@ -1,5 +1,19 @@
 # Explanation and HTML rendering for zaszlo types.
 #
+# Design principle: every zaszlo object is self-describing.
+#   .explain()            → plain-text mathematical description, readable in any
+#                           context: scripts, REPLs, Jupyter, CI logs.
+#   _repr_html_()         → annotated HTML card for Jupyter rich display.
+#   _repr_mimebundle_()   → both at once, keyed by MIME type; Jupyter picks this
+#                           up automatically so objects render without display().
+#   __repr__()            → compact one-liner for repr() / text/plain fallback.
+#
+# The contract for adding a new zaszlo type:
+#   1. Implement __repr__ (compact, no newlines).
+#   2. Add explain_<type>() and html_<type>() here in explain.py.
+#   3. Delegate from the class via lazy imports (avoids circular imports with types.py).
+#   4. Implement _repr_mimebundle_ returning {"text/html": ..., "text/plain": repr(self)}.
+#
 # All rendering logic lives here; types.py holds thin wrappers that
 # call into this module via lazy imports to avoid circular imports.
 
@@ -338,20 +352,25 @@ def explain_data(d) -> str:
     lines = [
         "FlagAlgebraData  (pre-SDP combinatorial data)",
         "",
-        f"  Types (s ≤ {d.problem.type_order}):  {len(d.types)}",
-        f"  Flags per type:       {flag_counts}  ({total_flags} total)",
-        f"  Admissible graphs:    {len(d.admissible)}",
-        f"  Density range:        [{dmin:.4f}, {dmax:.4f}]",
+        f"  Types:             {len(d.types)}  (one Q matrix / SDP block each)",
+        f"  Flags per type:    {flag_counts}  ({total_flags} total)",
+        f"  Admissible graphs: {len(d.admissible)}  (objects whose densities are bounded)",
+        f"  Density range:     [{dmin:.4f}, {dmax:.4f}]",
         "",
-        "What these are:",
-        "  Types      — non-isomorphic graphs with all vertices labeled.",
-        "               One block of the SDP certificate (Q matrix) per type.",
-        "  Flags      — graphs with a labeled type embedded; averaged over",
-        "               all extensions to produce density constraints.",
-        "  Admissible — the feasible graphs whose densities the SDP bounds.",
-        "  Pair dens  — for each (admissible H, type σ), a matrix p(H;σ)",
-        "               encoding how flag products land in H.  These are the",
-        "               SDP constraint coefficients.",
+        "This is the input to the SDP solver. The solver will search for PSD",
+        "matrices Q_σ (one per type σ) satisfying, for every admissible H:",
+        "",
+        "  bound − density(H)  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)  ≥  0",
+        "",
+        "Since Q_σ ≽ 0 and P_σ(H) ≥ 0 entry-wise, this certifies the bound",
+        "for all admissible graphs simultaneously.",
+        "",
+        "  Admissible graphs — the feasible graphs on n vertices; the SDP",
+        "    bounds their density.  Forbidden subgraphs have already been",
+        "    filtered out.",
+        "  Types — all-labeled graphs; each type σ indexes one SDP block Q_σ.",
+        "  Flags — graphs with a type embedded; pairs of flags over σ average",
+        "    to admissible densities, giving the constraint matrix P_σ(H).",
     ]
     return "\n".join(lines)
 
@@ -390,10 +409,21 @@ def html_data(d) -> str:
 # FlagAlgebraResult
 # ---------------------------------------------------------------------------
 
-def explain_result(r, data=None) -> str:
+def explain_result(r) -> str:
     bound_kind = "lower" if r.problem.minimize else "upper"
     ineq = "≥" if r.problem.minimize else "≤"
     density_name = "edge density" if r.problem.target is None else "target density"
+    kind = "graph" if r.problem.k == 2 else f"{r.problem.k}-uniform hypergraph"
+
+    # Proof claim in plain language.
+    n_forb = len(r.problem.forbidden) + len(r.problem.forbidden_induced)
+    if n_forb:
+        claim = (
+            f"Every {kind} avoiding the {n_forb} forbidden pattern(s) "
+            f"has {density_name} {ineq} {r.bound:.6f}."
+        )
+    else:
+        claim = f"Every admissible {kind} has {density_name} {ineq} {r.bound:.6f}."
 
     lines = [
         "FlagAlgebraResult",
@@ -401,98 +431,85 @@ def explain_result(r, data=None) -> str:
         f"  Bound  : {r.bound:.8f}  ({bound_kind} bound)",
         f"  Status : {r.status}",
         "",
-        f"This certifies: the {density_name} of every admissible graph is",
-        f"  {ineq} {r.bound:.6f}",
+        f"Proof claim: {claim}",
         "",
     ]
 
+    # --- Sharp (extremal) graphs ---
     sharps = _sharp_indices(r)
+    lines.append("Sharp (extremal) graphs:")
     if sharps:
-        lines.append(
-            f"Sharp graphs (slack < {_SHARP_TOL}, i.e. extremal): {len(sharps)} graph(s)"
-        )
-        if data is not None:
+        lines += [
+            f"  {len(sharps)} graph(s) achieve the bound with slack ≈ 0.",
+            "  These are the extremal configurations — graphs that saturate the bound",
+            "  and show it cannot be tightened without additional constraints.",
+        ]
+        if r.data is not None:
+            lines.append("")
             for i in sharps:
-                g = data.admissible[i]
-                lines.append(
-                    f"  [{i}]  {g}  (density = {float(data.densities[i]):.4f})"
-                )
+                g = r.data.admissible[i]
+                lines.append(f"    [{i}]  {g}  (density = {float(r.data.densities[i]):.4f})")
         else:
             lines.append(f"  indices: {sharps}")
-            lines.append("  (pass data= to .explain(data=...) to see the actual graphs)")
     else:
-        lines.append("No sharp graphs found (all slacks above threshold).")
-
+        lines.append("  No sharp graphs found (all slacks above threshold).")
     lines.append("")
+
+    # --- Proof certificate ---
+    lines.append("Proof certificate:")
     if r.Q is None:
         lines += [
-            "Q matrices: not extracted.",
-            "  Rerun solve_sdp(extract_Q=True), then call .explain_certificate().",
+            "  Q matrices not extracted — rerun solve_sdp(extract_Q=True) to",
+            "  access the full proof certificate.",
+            "",
+            "  The certificate consists of PSD matrices Q_σ (one per type σ)",
+            "  witnessing a sum-of-squares identity that holds for every admissible",
+            "  graph. It can be verified in exact rational arithmetic.",
         ]
     else:
-        q_sizes = [q.shape[0] for q in r.Q]
-        lines.append(f"Q matrices: {len(r.Q)} extracted  (sizes {q_sizes})")
+        import numpy as np
+
+        lhs = "density(H) − bound" if r.problem.minimize else "bound − density(H)"
+        lines += [
+            "  The bound is certified by PSD matrices Q_σ, one per type σ.",
+            "  For every admissible H the following identity holds and is ≥ 0:",
+            "",
+            f"    {lhs}  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)",
+            "",
+            "  where:",
+            "    P_σ(H) — pair density matrix of H over type σ (entry-wise ≥ 0)",
+            "    Q_σ    — PSD certificate matrix (one per type, found by SDP)",
+            "    ⟨A, B⟩ — matrix inner product  Σ_{ij} A_{ij} B_{ij}",
+            "",
+            "  Since Q_σ ≽ 0 and P_σ(H) ≥ 0 entry-wise, every term is ≥ 0,",
+            f"  so density(H) {ineq} bound for all admissible H.",
+            "",
+        ]
+
+        lines.append(f"  Q matrices ({len(r.Q)} total, one per type):")
+        for i, Q in enumerate(r.Q):
+            eigvals = np.linalg.eigvalsh(Q)
+            min_eig = float(eigvals.min())
+            note = "  ← near PSD boundary" if min_eig < 1e-6 else ""
+            lines.append(
+                f"    Q[{i}]  {Q.shape[0]}×{Q.shape[0]}   "
+                f"min eigenvalue: {min_eig:.2e}{note}"
+            )
+        lines.append("")
+
         if r.cholesky_factors is not None:
-            lines.append("Cholesky factors stored — certificate has been rounded.")
-        lines.append("Call .explain_certificate() for a breakdown of the SDP identity.")
-
-    return "\n".join(lines)
-
-
-def explain_certificate(r) -> str:
-    if r.Q is None:
-        raise ValueError(
-            "No Q matrices — rerun solve_sdp with extract_Q=True"
-        )
-
-    import numpy as np
-
-    ineq = "≥" if r.problem.minimize else "≤"
-    # Upper bound: bound − density(H) = Σ... ≥ 0  →  density(H) ≤ bound
-    # Lower bound: density(H) − bound = Σ... ≥ 0  →  density(H) ≥ bound
-    lhs = "density(H) − bound" if r.problem.minimize else "bound − density(H)"
-
-    lines = [
-        "SDP Certificate",
-        "===============",
-        "",
-        "The flag algebra bound is certified by the identity:",
-        "",
-        f"  {lhs} = Σ_σ ⟨P_σ(H), Q_σ⟩   for every admissible H",
-        "",
-        "where:",
-        "  P_σ(H) — pair density matrix of H over type σ (non-negative, precomputed)",
-        "  Q_σ    — PSD certificate matrix (one per type, found by the SDP solver)",
-        "  ⟨A, B⟩  — matrix inner product  Σ_{ij} A_{ij} B_{ij}",
-        "",
-        "Because Q_σ ≽ 0 and P_σ(H) ≥ 0 entrywise, every term is ≥ 0,",
-        f"so density(H) {ineq} bound for all admissible H.",
-        "",
-        "Q matrices:",
-    ]
-
-    for i, Q in enumerate(r.Q):
-        eigvals = np.linalg.eigvalsh(Q)
-        min_eig = float(eigvals.min())
-        note = "  ← near PSD boundary" if min_eig < 1e-6 else ""
-        lines.append(
-            f"  Q[{i}]  {Q.shape[0]}\xd7{Q.shape[0]}   "
-            f"min eigenvalue: {min_eig:.2e}{note}"
-        )
-
-    if r.cholesky_factors is not None:
-        lines += [
-            "",
-            "Cholesky factors L stored: Q[i] = L[i] @ L[i].T  (PSD by construction).",
-            "This is the rounded certificate. Use verify_certificate() to confirm",
-            "the identity holds exactly in rational arithmetic.",
-        ]
-    else:
-        lines += [
-            "",
-            "The Q matrices are raw solver output (floating-point).",
-            "Use round_certificate() then verify_certificate() for an exact check.",
-        ]
+            bound_str = (
+                str(r.bound_exact) if r.bound_exact is not None else f"{r.bound:.8f}"
+            )
+            lines += [
+                f"  Rounded to exact rationals.  Certified bound: {bound_str}",
+                "  Run verify_certificate() to confirm the identity in exact arithmetic.",
+            ]
+        else:
+            lines += [
+                "  Floating-point certificate (raw solver output).",
+                "  Run round_certificate() then verify_certificate() for an exact proof.",
+            ]
 
     return "\n".join(lines)
 
@@ -504,24 +521,29 @@ def explain_certificate(r) -> str:
 def explain_sharps(s: "SharpsResult") -> str:
     bound_word = "lower" if s.problem.minimize else "upper"
     ineq = "≥" if s.problem.minimize else "≤"
+    lhs = "density(H) − bound" if s.problem.minimize else "bound − density(H)"
 
     lines = [
         f"SharpsResult  (n={s.problem.n}, k={s.problem.k})",
         "",
         f"{len(s.indices)} sharp (extremal) graph(s) found.",
-        f"These are the admissible graphs whose density is closest to the {bound_word} bound —",
-        f"the configurations that determine the extremal structure of the problem.",
+        "",
+        "A graph is sharp when its density exactly meets the bound — slack = 0.",
+        "Sharp graphs are the extremal configurations: they show the bound is tight",
+        "and cannot be improved without changing the problem constraints.",
+        "",
+        "The residual is the exact rational value of",
+        f"  {lhs} − Σ_σ ⟨Q_σ, P_σ(H)⟩",
+        "computed from the rounded certificate.  A residual of 0 means the",
+        "certificate identity is tight at H; all residuals ≥ 0 verifies the proof.",
         "",
     ]
 
     if s.indices:
-        lines.append(f"Sharp graphs (slack ≈ 0):")
+        lines.append("Sharp graphs:")
         for idx, g, d in zip(s.indices, s.graphs, s.densities):
             res = s.residuals[idx]
-            res_str = str(res) if isinstance(res, type(res)) else f"{float(res):.2e}"
-            lines.append(
-                f"  [{idx}]  {g}   density = {d}   residual = {res_str}"
-            )
+            lines.append(f"  [{idx}]  {g}   density = {d}   residual = {res}")
     else:
         lines.append("No sharp graphs found — all slacks are above the threshold.")
 
@@ -564,17 +586,17 @@ def html_sharps(s: "SharpsResult") -> str:
     return _card("SharpsResult", meta, body)
 
 
-def html_result(r, data=None) -> str:
+def html_result(r) -> str:
     bound_kind = "lower bound" if r.problem.minimize else "upper bound"
     ineq = "≥" if r.problem.minimize else "≤"
     status_color = "#2a9d5c" if "optimal" in r.status else "#c0392b"
     sharps = _sharp_indices(r)
 
     if sharps:
-        if data is not None:
+        if r.data is not None:
             items = "".join(
-                f"<li>[{i}] {data.admissible[i]}"
-                f" &nbsp; (density={float(data.densities[i]):.4f})</li>"
+                f"<li>[{i}] {r.data.admissible[i]}"
+                f" &nbsp; (density={float(r.data.densities[i]):.4f})</li>"
                 for i in sharps
             )
         else:
@@ -590,11 +612,19 @@ def html_result(r, data=None) -> str:
 
     if r.Q is not None:
         q_sizes_str = ", ".join(str(q.shape[0]) for q in r.Q)
-        q_html = f"<b>Q matrices:</b> {len(r.Q)} ({q_sizes_str})<br>"
+        cert_status = (
+            "rounded &amp; exact"
+            if r.cholesky_factors is not None
+            else "floating-point — run round_certificate()"
+        )
+        q_html = (
+            f"<b>Certificate:</b> {len(r.Q)} Q matrices ({q_sizes_str})"
+            f" &nbsp;<span style='color:#888;font-size:11px;'>{cert_status}</span><br>"
+        )
     else:
         q_html = (
-            "<span style='color:#aaa;'>Q not extracted "
-            "(rerun solve_sdp with extract_Q=True)</span><br>"
+            "<span style='color:#aaa;'>Certificate not extracted — "
+            "rerun solve_sdp(extract_Q=True)</span><br>"
         )
 
     body = (

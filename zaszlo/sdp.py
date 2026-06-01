@@ -263,7 +263,7 @@ def solve_sdp(
         else:
             slacks.append(float("nan"))
 
-    return FlagAlgebraResult(data.problem, status, bound, Q_vals, slacks)
+    return FlagAlgebraResult(data.problem, status, bound, Q_vals, slacks, data=data)
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +473,7 @@ def round_certificate(
         cholesky_factors=cholesky_factors,
         Q_exact=Q_exact_list,
         bound_exact=bound_exact,
+        data=data,
     )
 
 
