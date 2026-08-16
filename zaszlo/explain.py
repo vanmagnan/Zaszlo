@@ -25,7 +25,19 @@ from math import comb
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from .types import Certificate, Flag, FlagAlgebraData, FlagAlgebraResult, FlagProblem, Hypergraph, SharpsResult
+    from .types import (
+        AuxiliaryConstraint,
+        Certificate,
+        DensityExpr,
+        Flag,
+        FlagAlgebraData,
+        FlagAlgebraElement,
+        FlagAlgebraResult,
+        FlagProblem,
+        Hypergraph,
+        SharpsResult,
+        UnlabeledExpr,
+    )
 
 _SHARP_TOL = 1e-4
 
@@ -264,14 +276,277 @@ def html_flag(f) -> str:
 
 
 # ---------------------------------------------------------------------------
+# DensityExpr
+# ---------------------------------------------------------------------------
+
+def _fmt_coef(coef: Fraction, *, leading: bool) -> str:
+    """Format a Fraction coefficient with a leading sign.
+
+    ``leading=True`` renders the first term (no leading '+' for positives).
+    Subsequent terms are separated by ' + ' or ' − ' with the magnitude.
+    """
+    sign = "-" if coef < 0 else "+"
+    mag = -coef if coef < 0 else coef
+
+    if mag == 1:
+        mag_str = ""      # bare sign: "K3", "-K3"
+        joiner = ""
+    else:
+        mag_str = str(mag)
+        joiner = "·"
+
+    if leading:
+        if coef < 0:
+            return f"-{mag_str}{joiner}" if mag_str else "-"
+        return f"{mag_str}{joiner}" if mag_str else ""
+    # Non-leading: use spaced infix sign for readability.
+    infix = " − " if coef < 0 else " + "
+    return f"{infix}{mag_str}{joiner}" if mag_str else infix
+
+
+def _graph_label(g: "Hypergraph") -> str:
+    """Short label for a graph inside a density term."""
+    return f"d({g.n}v/{g.k}u, {len(g.edges)}e)"
+
+
+def _format_density_expr(expr: "DensityExpr") -> str:
+    parts: list[str] = []
+    for i, (coef, graph) in enumerate(expr.terms):
+        parts.append(_fmt_coef(coef, leading=(i == 0)))
+        parts.append(_graph_label(graph))
+    return "".join(parts)
+
+
+def explain_density_expr(expr: "DensityExpr") -> str:
+    n_terms = len(expr.terms)
+    lines = [
+        f"DensityExpr  ({n_terms} term{'s' if n_terms != 1 else ''}, k={expr.k})",
+        "",
+        "Linear combination of induced densities:",
+        f"  f(H) = {_format_density_expr(expr)}",
+        "",
+        "Terms:",
+    ]
+    for coef, graph in expr.terms:
+        lines.append(f"  coefficient {coef}   graph {graph}")
+    lines += [
+        "",
+        "Evaluating on an admissible graph H returns the exact rational value",
+        "Σ_i c_i · induced_density(H, G_i).",
+    ]
+    return "\n".join(lines)
+
+
+def html_density_expr(expr: "DensityExpr") -> str:
+    formula = _format_density_expr(expr)
+    rows = "".join(
+        f"<tr>"
+        f"<td style='padding:2px 8px; text-align:right;'>{coef}</td>"
+        f"<td style='padding:2px 8px; color:#666;'>·</td>"
+        f"<td style='padding:2px 8px;'>d(H, {g})</td>"
+        f"</tr>"
+        for coef, g in expr.terms
+    )
+    table = (
+        "<table style='border-collapse:collapse; font-size:12px; margin-top:4px;'>"
+        "<thead><tr style='border-bottom:1px solid #ccc;'>"
+        "<th style='padding:2px 8px; text-align:right;'>coeff</th>"
+        "<th></th>"
+        "<th style='padding:2px 8px; text-align:left;'>induced density of</th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+    body = (
+        f"<b>f(H) =</b> {formula}<br>"
+        f"{table}"
+    )
+    meta = f"{len(expr.terms)} term{'s' if len(expr.terms) != 1 else ''} · k={expr.k}"
+    return _card("DensityExpr", meta, body)
+
+
+# ---------------------------------------------------------------------------
+# FlagAlgebraElement  —  homogeneous element of A^σ
+# ---------------------------------------------------------------------------
+
+def _short_type_desc(type_flag) -> str:
+    s = type_flag.graph.n
+    ne = len(type_flag.graph.edges)
+    return f"σ = {s}v {type_flag.graph.k}-uniform, {ne} edge{'s' if ne != 1 else ''}"
+
+
+def _short_flag_desc(f) -> str:
+    ne = len(f.graph.edges)
+    return f"{f.graph.n}v {f.graph.k}-uniform, {ne} edge{'s' if ne != 1 else ''}"
+
+
+def _format_algebra_element(e: "FlagAlgebraElement") -> str:
+    if e.is_zero:
+        return "0"
+    parts: list[str] = []
+    for i, (coef, f) in enumerate(e.terms):
+        parts.append(_fmt_coef(coef, leading=(i == 0)))
+        parts.append(f"f({_short_flag_desc(f)})")
+    return "".join(parts)
+
+
+def explain_flag_algebra_element(e: "FlagAlgebraElement") -> str:
+    if e.is_zero:
+        return "\n".join([
+            f"FlagAlgebraElement  [zero]  in A^σ,  grade n = {e.n}",
+            "",
+            f"Type σ:  {_short_type_desc(e.type)}",
+            "",
+            "This element is the zero of A^σ at grade n.  All arithmetic and",
+            "unlabeling operations return zero as expected at this grade.",
+        ])
+    lines = [
+        f"FlagAlgebraElement  ({len(e.terms)} term{'s' if len(e.terms) != 1 else ''}) "
+        f"in A^σ,  grade n = {e.n}",
+        "",
+        f"Type σ:  {_short_type_desc(e.type)}",
+        "",
+        f"Value formula:  e = {_format_algebra_element(e)}",
+        "",
+        "Terms:",
+    ]
+    for coef, f in e.terms:
+        lines.append(f"  {coef}  ·  flag(n={f.graph.n}, edges={f.graph.edges})")
+    lines += [
+        "",
+        "Arithmetic:  addition/subtraction preserves grade; f · g yields",
+        "an element at grade n_f + n_g − s.  Apply unlabel(e) to project into A^∅.",
+    ]
+    return "\n".join(lines)
+
+
+def html_flag_algebra_element(e: "FlagAlgebraElement") -> str:
+    formula = _format_algebra_element(e)
+    if e.is_zero:
+        body = f"<b>e</b> = 0<br><b>Type σ:</b> {_short_type_desc(e.type)}"
+        meta = f"zero · grade n={e.n} · k={e.k}"
+        return _card("FlagAlgebraElement", meta, body)
+    rows = "".join(
+        f"<tr><td style='padding:2px 8px; text-align:right;'>{c}</td>"
+        f"<td style='padding:2px 8px; color:#666;'>·</td>"
+        f"<td style='padding:2px 8px;'>flag(n={f.graph.n}, edges={f.graph.edges})</td></tr>"
+        for c, f in e.terms
+    )
+    table = (
+        "<table style='border-collapse:collapse; font-size:11px; margin-top:4px;'>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+    body = (
+        f"<b>e</b> = {formula}<br>"
+        f"<b>Type σ:</b> {_short_type_desc(e.type)}<br>"
+        f"{table}"
+    )
+    meta = (
+        f"{len(e.terms)} term{'s' if len(e.terms) != 1 else ''} · "
+        f"grade n={e.n} · k={e.k}"
+    )
+    return _card("FlagAlgebraElement (A^σ)", meta, body)
+
+
+# ---------------------------------------------------------------------------
+# UnlabeledExpr  —  homogeneous element of A^∅
+# ---------------------------------------------------------------------------
+
+def _format_unlabeled_expr(u: "UnlabeledExpr") -> str:
+    if u.is_zero:
+        return "0"
+    parts: list[str] = []
+    for i, (coef, g) in enumerate(u.terms):
+        parts.append(_fmt_coef(coef, leading=(i == 0)))
+        parts.append(f"H({g.n}v, {len(g.edges)}e)")
+    return "".join(parts)
+
+
+def explain_unlabeled_expr(u: "UnlabeledExpr") -> str:
+    if u.is_zero:
+        return "\n".join([
+            f"UnlabeledExpr  [zero]  in A^∅,  grade n = {u.n},  k = {u.k}",
+            "",
+            "This element is the zero of A^∅ at this grade.",
+        ])
+    lines = [
+        f"UnlabeledExpr  ({len(u.terms)} term{'s' if len(u.terms) != 1 else ''}) "
+        f"in A^∅,  grade n = {u.n},  k = {u.k}",
+        "",
+        f"Value formula:  u = {_format_unlabeled_expr(u)}",
+        "",
+        "Basis: admissible-graph iso classes on n vertices.",
+        "Evaluation:  u.evaluate(H) = Σ cᵢ · induced_density(H, Hᵢ)  for admissible H.",
+        "",
+        "Terms:",
+    ]
+    for coef, g in u.terms:
+        lines.append(f"  {coef}  ·  {g}")
+    return "\n".join(lines)
+
+
+def html_unlabeled_expr(u: "UnlabeledExpr") -> str:
+    formula = _format_unlabeled_expr(u)
+    if u.is_zero:
+        body = "<b>u</b> = 0"
+        return _card("UnlabeledExpr (A^∅)", f"zero · n={u.n} · k={u.k}", body)
+    rows = "".join(
+        f"<tr><td style='padding:2px 8px; text-align:right;'>{c}</td>"
+        f"<td style='padding:2px 8px; color:#666;'>·</td>"
+        f"<td style='padding:2px 8px;'>{g}</td></tr>"
+        for c, g in u.terms
+    )
+    table = (
+        "<table style='border-collapse:collapse; font-size:11px; margin-top:4px;'>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+    body = f"<b>u</b> = {formula}<br>{table}"
+    meta = (
+        f"{len(u.terms)} term{'s' if len(u.terms) != 1 else ''} · "
+        f"n={u.n} · k={u.k}"
+    )
+    return _card("UnlabeledExpr (A^∅)", meta, body)
+
+
+# ---------------------------------------------------------------------------
+# AuxiliaryConstraint  —  ⟦e⟧ ≥ 0  imposed on the SDP
+# ---------------------------------------------------------------------------
+
+def explain_aux_constraint(c: "AuxiliaryConstraint") -> str:
+    formula = _format_unlabeled_expr(c.expr)
+    return "\n".join([
+        f"AuxiliaryConstraint  ⟦e⟧ {c.sense}  at grade n = {c.n},  k = {c.k}",
+        "",
+        f"Claim:  {formula}  ≥ 0  on every admissible graphon.",
+        "",
+        "Injects a nonneg SDP variable μ ≥ 0 that adds  μ · Σ cᵢ · d(Hᵢ; G)",
+        "to the sum-of-squares identity.  The claim is asserted by the user",
+        "and is not verified by the SDP — only that the resulting bound is",
+        "certified in exact arithmetic.",
+    ])
+
+
+def html_aux_constraint(c: "AuxiliaryConstraint") -> str:
+    formula = _format_unlabeled_expr(c.expr)
+    body = (
+        f"<b>Claim:</b> {formula} &nbsp;≥&nbsp; 0 on every admissible graphon.<br>"
+        f"<span style='color:#888; font-size:11px;'>"
+        f"Injects a nonneg SDP variable μ ≥ 0 into the sum-of-squares identity.</span>"
+    )
+    meta = f"⟦e⟧ {c.sense} · n={c.n} · k={c.k}"
+    return _card("AuxiliaryConstraint", meta, body)
+
+
+# ---------------------------------------------------------------------------
 # FlagProblem
 # ---------------------------------------------------------------------------
 
 def explain_problem(p) -> str:
+    from .types import DensityExpr, Hypergraph
     bound_kind = "lower bound" if p.minimize else "upper bound"
     direction = "minimize" if p.minimize else "maximize"
     if p.target is None:
         target_desc = "edge density"
+    elif isinstance(p.target, DensityExpr):
+        target_desc = f"density functional  {_format_density_expr(p.target)}"
     else:
         target_desc = f"induced density of {p.target}"
 
@@ -298,20 +573,44 @@ def explain_problem(p) -> str:
         for g in p.forbidden_induced:
             lines.append(f"  {g}")
 
-    if p.target is not None:
+    if isinstance(p.target, DensityExpr):
+        lines += ["", "Target functional:"]
+        for coef, g in p.target.terms:
+            lines.append(f"  {coef}  ·  d(H, {g})")
+    elif p.target is not None:
         lines += ["", f"Target: {p.target}"]
+
+    if p.aux_constraints:
+        lines += [
+            "",
+            f"Auxiliary flag-algebra constraints ({len(p.aux_constraints)}):",
+        ]
+        for idx, c in enumerate(p.aux_constraints):
+            lines.append(
+                f"  [{idx}]  ⟦e⟧ {c.sense}  at grade n={c.n}, "
+                f"{len(c.expr.terms)} basis term{'s' if len(c.expr.terms) != 1 else ''}"
+            )
+        lines += [
+            "        Adds one nonneg SDP variable μⱼ per constraint;",
+            "        can tighten the bound if the aux inequality is tight at the extremal.",
+        ]
 
     return "\n".join(lines)
 
 
 def html_problem(p) -> str:
+    from .types import DensityExpr
     bound_kind = "lower bound" if p.minimize else "upper bound"
     direction = "minimize" if p.minimize else "maximize"
-    target_desc = (
-        "edge density"
-        if p.target is None
-        else f"induced density of {p.target.n}-vertex target"
-    )
+    if p.target is None:
+        target_desc = "edge density"
+    elif isinstance(p.target, DensityExpr):
+        target_desc = (
+            f"density functional ({len(p.target.terms)} term"
+            f"{'s' if len(p.target.terms) != 1 else ''})"
+        )
+    else:
+        target_desc = f"induced density of {p.target.n}-vertex target"
 
     forbidden_html = ""
     if p.forbidden:
@@ -329,11 +628,30 @@ def html_problem(p) -> str:
     if not p.forbidden and not p.forbidden_induced:
         forbidden_html = "No constraints.<br>"
 
+    target_html = ""
+    if isinstance(p.target, DensityExpr):
+        formula = _format_density_expr(p.target)
+        target_html = f"<b>f(H) =</b> {formula}<br>"
+
+    aux_html = ""
+    if p.aux_constraints:
+        items = "".join(
+            f"<li>⟦e⟧ {c.sense} at grade n={c.n}, "
+            f"{len(c.expr.terms)} term{'s' if len(c.expr.terms) != 1 else ''}</li>"
+            for c in p.aux_constraints
+        )
+        aux_html = (
+            f"<b>Aux constraints</b> ({len(p.aux_constraints)}):"
+            f"<ul style='margin:2px 0 2px 16px;'>{items}</ul>"
+        )
+
     body = (
         f"<b>Goal:</b> {direction} {target_desc}<br>"
+        f"{target_html}"
         f"<b>n</b>={p.n} &nbsp; <b>k</b>={p.k} &nbsp; "
         f"<b>type_order</b>={p.type_order}<br>"
         f"{forbidden_html}"
+        f"{aux_html}"
     )
     return _card("FlagProblem", f"k={p.k}, n={p.n}, {bound_kind}", body)
 
@@ -513,6 +831,29 @@ def explain_result(r) -> str:
                 "  Run round_certificate() then verify_certificate() for an exact proof.",
             ]
 
+    # --- Auxiliary constraint weights (μ_j) ---
+    if r.mu:
+        active = [(j, m) for j, m in enumerate(r.mu) if abs(m) > 1e-9]
+        lines += [
+            "",
+            f"Auxiliary constraints: {len(r.mu)} declared, {len(active)} with μ > 0.",
+        ]
+        for j, m in active:
+            lines.append(f"    μ[{j}] = {m:.6g}")
+
+    # --- Certificate summary (if produced by solve_and_certify) ---
+    if r.certificate is not None:
+        cert = r.certificate
+        cert_status = "valid" if cert.valid else "INVALID"
+        lines += [
+            "",
+            "Exact certificate (from solve_and_certify):",
+            f"  Certified bound : {cert.bound}  [{cert_status}]",
+            f"  Active constraints: {len(cert.active_constraints)} admissible graph(s) "
+            f"with residual exactly 0.",
+            "  Call result.certificate.explain() for the full certificate breakdown.",
+        ]
+
     return "\n".join(lines)
 
 
@@ -681,6 +1022,16 @@ def explain_certificate(c: "Certificate") -> str:
     for i, Q in enumerate(c.Q):
         n = len(Q)
         lines.append(f"  Q[{i}]  {n}×{n}  (rational entries, PSD by construction)")
+
+    # Auxiliary constraint weights (μ_j)
+    if c.mu:
+        active = [(j, m) for j, m in enumerate(c.mu) if m != 0]
+        lines += [
+            "",
+            f"Auxiliary constraints: {len(c.mu)} declared, {len(active)} with μ > 0.",
+        ]
+        for j, m in active:
+            lines.append(f"  μ[{j}] = {m}  =  {float(m):.6g}")
 
     if not c.valid:
         min_res = min(c.residuals)

@@ -29,28 +29,49 @@ the `[tutorial]` extra adds matplotlib, networkx, and jupyter for the tutorial n
 The maximum edge density in a triangle-free graph is 1/2 (Mantel, 1907).
 
 ```python
-from zaszlo import FlagProblem, Hypergraph, build_flag_algebra_data, solve_sdp, certify
+from zaszlo import FlagProblem, complete, solve
 
-K3 = Hypergraph(3, 2, [(1, 2), (1, 3), (2, 3)])
+prob   = FlagProblem(4, 2, 2, forbidden=[complete(3)])
+result = solve(prob)
+print(result.bound)               # ≈ 0.5
 
-prob = FlagProblem(
-    n=4,
-    type_order=2,
-    k=2,
-    forbidden=[K3],
-    minimize=False,
-)
-
-data   = build_flag_algebra_data(prob)
-result = solve_sdp(data, extract_Q=True)
-proof  = certify(result)        # round + verify; returns a Certificate
-
-print(proof.valid)              # True
-print(proof.bound)              # a Fraction close to but slightly above 1/2
+result = solve(prob, certify=True)
+print(result.certificate.valid)   # True
+print(result.certificate.bound)   # Fraction close to 1/2
 ```
 
 For a step-by-step walkthrough — including rational certificates, the pentagon problem, and
 K₄⁻-free 3-uniform hypergraphs — see the tutorial notebooks above.
+
+## API overview
+
+`solve(prob)` is the main entry point.  Pass `certify=True` to also produce
+an exact rational certificate:
+
+| Call | `result.bound` | `result.certificate` |
+|---|---|---|
+| `solve(prob)` | float | `None` |
+| `solve(prob, certify=True)` | float | `Certificate` with exact `Fraction` bound |
+
+The full step-by-step pipeline is also public for fine-grained control:
+
+```python
+from zaszlo import build_flag_algebra_data, solve_sdp, certify, identify_sharps
+
+data   = build_flag_algebra_data(prob)   # types, flags, pair densities
+result = solve_sdp(data, extract_Q=True) # float SDP solution
+proof  = certify(result)                 # exact rational Certificate
+```
+
+Every object in this library has an `.explain()` method that returns a
+plain-English description of its mathematical content — useful for
+interactive inspection or when working with an LLM.
+
+```python
+prob.explain()                    # what problem is being solved
+result.explain()                  # bound, status, sharp graphs
+result.certificate.explain()      # full rational proof breakdown
+```
 
 ## Running the tests
 

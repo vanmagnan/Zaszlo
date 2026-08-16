@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
+
+from .algebra import lift_to
 from .densities import compute_pair_densities, edge_density, induced_density
 from .generation import generate_admissible, generate_flags, generate_types
-from .types import FlagAlgebraData, FlagProblem
+from .types import DensityExpr, FlagAlgebraData, FlagProblem, Hypergraph
 
 
 def build_flag_algebra_data(prob: FlagProblem) -> FlagAlgebraData:
@@ -53,10 +56,20 @@ def build_flag_algebra_data(prob: FlagProblem) -> FlagAlgebraData:
     )
 
     # Density of each admissible graph.
-    if prob.target is None:
+    target = prob.target
+    if target is None:
         densities = [edge_density(H) for H in admissible]
+    elif isinstance(target, Hypergraph):
+        densities = [induced_density(H, target) for H in admissible]
+    elif isinstance(target, DensityExpr):
+        densities = [target.evaluate(H) for H in admissible]
     else:
-        densities = [induced_density(H, prob.target) for H in admissible]
+        # FlagProblem.__init__ already validates this; guard here defensively
+        # so future callers get an obvious error rather than a silent miscount.
+        raise TypeError(
+            f"Unsupported target type {type(target).__name__}; expected None, "
+            "Hypergraph, or DensityExpr."
+        )
 
     # Pair densities: pair_dens[H_idx][sigma] = upper-triangular Fraction matrix.
     pair_dens = [
@@ -64,4 +77,19 @@ def build_flag_algebra_data(prob: FlagProblem) -> FlagAlgebraData:
         for H in admissible
     ]
 
-    return FlagAlgebraData(prob, types, flags, admissible, densities, pair_dens)
+    # Auxiliary constraint coefficients (per-H, lifted to problem grade n).
+    # aux_coefficients[j][H_idx] = coefficient of admissible[H_idx] in
+    # lift_to(constraint_j.expr, n).  Empty when there are no aux constraints.
+    aux_coefficients: list[list[Fraction]] = []
+    for constraint in prob.aux_constraints:
+        lifted = lift_to(constraint.expr, n)
+        coef_by_H: dict[Hypergraph, Fraction] = dict(
+            (h, c) for c, h in lifted.terms
+        )
+        row = [coef_by_H.get(H, Fraction(0)) for H in admissible]
+        aux_coefficients.append(row)
+
+    return FlagAlgebraData(
+        prob, types, flags, admissible, densities, pair_dens,
+        aux_coefficients=aux_coefficients,
+    )

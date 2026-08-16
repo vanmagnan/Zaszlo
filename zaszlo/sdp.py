@@ -3,18 +3,24 @@
 # Two modes, controlled by prob.minimize:
 #
 #   Upper bound (minimize=False, maximize density):
-#     Minimize λ  subject to:  λ - Σ_σ <P_σ(H_i), Q_σ> - s_i = density(H_i)
-#     Q_σ ≽ 0 and P_σ(H_i) ≽ 0  →  flag_sum ≥ 0, slack ≥ 0  →  λ ≥ density(H_i)
+#     Minimize λ  subject to:  λ - Σ_σ <P_σ(H_i), Q_σ> - Σ_j μ_j c_{H_i,j} - s_i = density(H_i)
+#     Q_σ ≽ 0, P_σ(H_i) ≽ 0, μ_j ≥ 0  →  effective:  λ ≥ density(H_i) + <Q,P> + Σ_j μ_j c_{H_i,j}
 #
 #   Lower bound (minimize=True, minimize density):
-#     Maximize λ  subject to:  λ + Σ_σ <P_σ(H_i), Q_σ> - s_i = density(H_i)
-#     flag_sum ≥ 0, slack ≥ 0  →  λ ≤ density(H_i)
+#     Maximize λ  subject to:  λ + Σ_σ <P_σ(H_i), Q_σ> + Σ_j μ_j c_{H_i,j} - s_i = density(H_i)
+#     effective:  λ ≤ density(H_i) − <Q,P> − Σ_j μ_j c_{H_i,j}
+#
+# The extra μ_j ≥ 0 variables carry auxiliary flag-algebra inequalities
+# ⟦e_j⟧ ≥ 0 supplied via prob.aux_constraints.  c_{H_i,j} is the coefficient of
+# H_i in the grade-n lift of e_j.  In any density-weighted sum Σ_i ρ_i c_{H_i,j}
+# = ⟦e_j⟧(G) → nonneg on admissible graphons — so μ_j c_{H_i,j} contributes a
+# nonneg extra term in the weighted identity, and the bound remains valid.
 #
 # Inner product <P, Q> for symmetric Q and upper-triangular P:
 #   Σ_j P[j,j]*Q[j,j]  +  2 * Σ_{j<k} P[j,k]*Q[j,k]
 #
 # Clarabel standard form:  min (1/2) x'Px + q'x  s.t.  Ax + s = b,  s ∈ K
-# Cone ordering: [ZeroCone (equalities) | PSDCone per type | NonnegCone (slacks)]
+# Cone ordering: [ZeroCone (equalities) | PSDCone per type | NonnegCone (slacks + μ_j)]
 # Q variables stored in x using column-major upper-triangular order; the √2
 # off-diagonal scaling required by Clarabel's PSD cone appears only in A.
 
@@ -62,7 +68,10 @@ def build_sdp(
     Parameters
     ----------
     data:
-        Precomputed flag algebra data.
+        Precomputed flag algebra data.  When ``data.aux_coefficients`` is
+        non-empty, one extra nonneg SDP variable ``μ_j`` is added per aux
+        constraint, with its column set to ``−c_{H,j}`` in each H equation
+        (see the module docstring for the sign derivation).
     sharps:
         Indices (0-based) of admissible graphs known to be extremal. These
         get equality constraints with no slack variable.
@@ -78,10 +87,14 @@ def build_sdp(
         'slack_offset' — start index of slack block in x
         'non_sharp'    — ordered list of non-sharp H indices
         'slack_map'    — maps H index → local slack position
+        'mu_offset'    — start index of μ block in x (or slack_offset+num_slacks
+                          if no aux constraints)
+        'num_aux'      — number of auxiliary constraints
     """
     sharps = set(sharps or [])
     num_types = len(data.types)
     num_H = len(data.admissible)
+    num_aux = len(data.aux_coefficients)
 
     flag_sizes = [len(data.flags[sigma]) for sigma in range(num_types)]
     tri_sizes = [n * (n + 1) // 2 for n in flag_sizes]
@@ -90,14 +103,15 @@ def build_sdp(
     num_slacks = len(non_sharp)
     slack_map = {i: loc for loc, i in enumerate(non_sharp)}
 
-    # Variable layout in x: [λ, Q_0_vec, Q_1_vec, ..., slack_0, slack_1, ...]
+    # Variable layout in x: [λ, Q_0_vec, ..., slack_0, ..., μ_0, ..., μ_{num_aux-1}]
     q_offsets: list[int] = []
     offset = 1
     for ts in tri_sizes:
         q_offsets.append(offset)
         offset += ts
     slack_offset = offset
-    total_vars = slack_offset + num_slacks
+    mu_offset = slack_offset + num_slacks
+    total_vars = mu_offset + num_aux
 
     # Clarabel always minimizes; negate λ for the lower-bound (maximize) case.
     q_obj = np.zeros(total_vars)
@@ -106,7 +120,9 @@ def build_sdp(
     csign = 1 if data.problem.minimize else -1
 
     num_psd_rows = sum(tri_sizes)
-    total_rows = num_H + num_psd_rows + num_slacks
+    # Nonneg cone covers both slack variables and μ_j (both ≥ 0).
+    num_nonneg = num_slacks + num_aux
+    total_rows = num_H + num_psd_rows + num_nonneg
 
     rows_coo: list[int] = []
     cols_coo: list[int] = []
@@ -136,6 +152,25 @@ def build_sdp(
             cols_coo.append(slack_offset + slack_map[i])
             vals_coo.append(-1.0)
 
+        # Aux constraint columns: coefficient of μ_j in row i is −c_{H_i,j}
+        # (upper) or +c_{H_i,j} (lower).  Equivalently: sign = csign, since
+        # csign is −1 for upper and +1 for lower — but that's a coincidence
+        # of sign conventions.  The DERIVED sign for both modes is the SAME
+        # (subtract μ·c from LHS in upper, add in lower — see module docstring).
+        # Concretely: aux column entry = csign * c_{H_i,j} makes the effective
+        # constraint slack = λ - density - <Q,P> - μ·c (upper) or
+        # slack = density - λ - <Q,P> - μ·c (lower), and both variants give
+        # rise to a "+μ·⟦e⟧" nonneg contribution in the weighted-density sum
+        # that proves the bound.  See the sign-derivation comment in the
+        # module docstring above for the algebra.
+        for j in range(num_aux):
+            c = float(data.aux_coefficients[j][i])
+            if c == 0.0:
+                continue
+            rows_coo.append(i)
+            cols_coo.append(mu_offset + j)
+            vals_coo.append(csign * c)
+
         b[i] = float(data.densities[i])
 
     # --- PSD constraints (one block per type, rows num_H..num_H+Σtri-1) ---
@@ -154,11 +189,15 @@ def build_sdp(
                 cols_coo.append(q_off + idx)
                 vals_coo.append(-scale)
 
-    # --- Non-negativity constraints (NonnegCone, last num_slacks rows) ---
+    # --- Non-negativity constraints (NonnegCone: slacks then μ_j) ---
     nonneg_base = num_H + num_psd_rows
     for loc in range(num_slacks):
         rows_coo.append(nonneg_base + loc)
         cols_coo.append(slack_offset + loc)
+        vals_coo.append(-1.0)
+    for j in range(num_aux):
+        rows_coo.append(nonneg_base + num_slacks + j)
+        cols_coo.append(mu_offset + j)
         vals_coo.append(-1.0)
 
     A = sp.csc_matrix(
@@ -170,8 +209,8 @@ def build_sdp(
     cones: list[Any] = [clarabel.ZeroConeT(num_H)]
     for nf in flag_sizes:
         cones.append(clarabel.PSDTriangleConeT(nf))  # nf = matrix size n, not n*(n+1)/2
-    if num_slacks > 0:
-        cones.append(clarabel.NonnegativeConeT(num_slacks))
+    if num_nonneg > 0:
+        cones.append(clarabel.NonnegativeConeT(num_nonneg))
 
     return {
         "P": P_zero,
@@ -184,6 +223,8 @@ def build_sdp(
         "slack_offset": slack_offset,
         "non_sharp": non_sharp,
         "slack_map": slack_map,
+        "mu_offset": mu_offset,
+        "num_aux": num_aux,
     }
 
 
@@ -253,6 +294,8 @@ def solve_sdp(
     sharps_set = set(sharps or [])
     slack_map = built["slack_map"]
     slack_offset = built["slack_offset"]
+    mu_offset = built["mu_offset"]
+    num_aux = built["num_aux"]
 
     slacks: list[float] = []
     for i in range(num_H):
@@ -263,7 +306,13 @@ def solve_sdp(
         else:
             slacks.append(float("nan"))
 
-    return FlagAlgebraResult(data.problem, status, bound, Q_vals, slacks, data=data)
+    mu: list[float] = []
+    if x is not None and num_aux > 0:
+        mu = [float(x[mu_offset + j]) for j in range(num_aux)]
+
+    return FlagAlgebraResult(
+        data.problem, status, bound, Q_vals, slacks, data=data, mu=mu,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +360,7 @@ def verify_certificate(
     minimize = data.problem.minimize
     denom_limit = round(1 / rat_tol)
 
-    # Step 1: rationalize λ and Q matrices.
+    # Step 1: rationalize λ, Q matrices, and μ (aux constraint weights).
     # Use exact Fraction values from round_certificate when available; this avoids
     # re-rationalizing floats from L_rat @ L_rat.T which introduces small errors.
     if result.bound_exact is not None:
@@ -329,6 +378,16 @@ def verify_certificate(
             for q in result.Q
         ]
 
+    # μ: use pre-rounded exact values when available, else rationalize (floored
+    # to nonneg to keep the certificate valid — μ ≥ 0 is a hard requirement).
+    if result.mu_exact is not None:
+        mu_rat = result.mu_exact
+    else:
+        mu_rat = [
+            max(Fraction(0), Fraction(m).limit_denominator(denom_limit))
+            for m in result.mu
+        ]
+
     # Step 2: PSD check using float eigenvalues.
     min_psd_eigval = min(
         float(np.linalg.eigvalsh(q).min())
@@ -341,10 +400,14 @@ def verify_certificate(
         psd_ok = min_psd_eigval >= -psd_tol
 
     # Step 3: exact rational residuals.
+    #   Upper bound: residual[i] = λ - <Q,P(H_i)> - Σ μ_j·c_{H_i,j} - density(H_i) ≥ 0
+    #   Lower bound: residual[i] = density(H_i) - λ - <Q,P(H_i)> - Σ μ_j·c_{H_i,j} ≥ 0
+    # (both derived from the equation slack ≥ 0 in the corresponding sign convention).
     flag_sums = _compute_flag_sums(data, Q_rat)
+    aux_sums = _compute_aux_sums(data, mu_rat)
     residuals = [
-        (data.densities[i] - lam_rat - flag_sums[i]) if minimize
-        else (lam_rat - flag_sums[i] - data.densities[i])
+        (data.densities[i] - lam_rat - flag_sums[i] - aux_sums[i]) if minimize
+        else (lam_rat - flag_sums[i] - aux_sums[i] - data.densities[i])
         for i in range(len(data.admissible))
     ]
 
@@ -357,6 +420,7 @@ def verify_certificate(
         "min_psd_eigval": min_psd_eigval,
         "residuals": residuals,
         "min_residual": min_residual,
+        "mu": mu_rat,
     }
 
 
@@ -384,6 +448,28 @@ def _compute_flag_sums(
                     flag_sum += P[j][kk] * factor * Q_s[j][kk]
         flag_sums.append(flag_sum)
     return flag_sums
+
+
+def _compute_aux_sums(
+    data: FlagAlgebraData,
+    mu_rat: list[Fraction],
+) -> list[Fraction]:
+    """Compute Σ_j μ_j · c_{H_i, j} for each admissible graph H_i in exact arithmetic.
+
+    Returns a zero list when the problem has no aux constraints or μ is empty.
+    """
+    num_H = len(data.admissible)
+    if not mu_rat or not data.aux_coefficients:
+        return [Fraction(0) for _ in range(num_H)]
+    aux_sums = [Fraction(0) for _ in range(num_H)]
+    for j, mu_j in enumerate(mu_rat):
+        if mu_j == 0:
+            continue
+        row = data.aux_coefficients[j]
+        for i in range(num_H):
+            if row[i] != 0:
+                aux_sums[i] += mu_j * row[i]
+    return aux_sums
 
 
 def round_certificate(
@@ -457,15 +543,31 @@ def round_certificate(
         cholesky_factors.append(L_rat)
         rounded_Qs.append(L_rat @ L_rat.T)
 
-    # Compute the tightest certified bound compatible with the rounded Q.
-    # Rounding L changes the flag sums, so the solver's bound may not be
-    # achievable; we take the max/min over all admissible graphs instead.
+    # Round μ_j to rationals (floored to nonneg so the certificate remains valid).
+    mu_exact: list[Fraction] = [
+        max(Fraction(0), Fraction(m).limit_denominator(denom_limit))
+        for m in result.mu
+    ]
+
+    # Compute the tightest certified bound compatible with the rounded Q and μ.
+    # Rounding L (and μ) changes the flag / aux sums, so the solver's bound may
+    # not be achievable; we take the max/min over all admissible graphs instead.
+    #   Upper: bound_exact = max_i (density(H_i) + flag_sum(i) + aux_sum(i))
+    #   Lower: bound_exact = min_i (density(H_i) - flag_sum(i) - aux_sum(i))
     flag_sums = _compute_flag_sums(data, Q_exact_list)
+    aux_sums = _compute_aux_sums(data, mu_exact)
     minimize = data.problem.minimize
+    n_admissible = len(data.admissible)
     if not minimize:
-        bound_exact = max(data.densities[i] + flag_sums[i] for i in range(len(data.admissible)))
+        bound_exact = max(
+            data.densities[i] + flag_sums[i] + aux_sums[i]
+            for i in range(n_admissible)
+        )
     else:
-        bound_exact = min(data.densities[i] - flag_sums[i] for i in range(len(data.admissible)))
+        bound_exact = min(
+            data.densities[i] - flag_sums[i] - aux_sums[i]
+            for i in range(n_admissible)
+        )
 
     bound_rat = float(bound_exact)
     return FlagAlgebraResult(
@@ -474,6 +576,8 @@ def round_certificate(
         Q_exact=Q_exact_list,
         bound_exact=bound_exact,
         data=data,
+        mu=[float(m) for m in mu_exact],
+        mu_exact=mu_exact,
     )
 
 
@@ -581,4 +685,5 @@ def certify(
         Q=rounded.Q_exact,
         residuals=cert_dict["residuals"],
         data=data,
+        mu=cert_dict["mu"],
     )
