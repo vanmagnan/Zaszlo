@@ -22,6 +22,9 @@ tutorial = ["matplotlib", "networkx", "jupyter"]
 [project.urls]
 Repository = "https://github.com/vanmagnan/zaszlo"
 
+[tool.pytest.ini_options]
+markers = ["slow: full-pipeline SDP tests; skip with -m 'not slow'"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["zaszlo*"]

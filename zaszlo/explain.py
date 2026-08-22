@@ -72,6 +72,14 @@ def _sharp_indices(r, tol: float = _SHARP_TOL) -> list[int]:
     return [i for i, s in enumerate(r.slacks) if not math.isnan(s) and s < tol]
 
 
+_SENSE_DISPLAY = {">=0": "≥ 0", "<=0": "≤ 0", "=0": "= 0"}
+
+
+def _sense_str(sense: str) -> str:
+    """Unicode form of the ASCII sense stored on AuxiliaryConstraint."""
+    return _SENSE_DISPLAY.get(sense, sense)
+
+
 # ---------------------------------------------------------------------------
 # SVG generation (k=2 or k=3, n ≤ 8 only)
 # ---------------------------------------------------------------------------
@@ -305,8 +313,12 @@ def _fmt_coef(coef: Fraction, *, leading: bool) -> str:
 
 
 def _graph_label(g: "Hypergraph") -> str:
-    """Short label for a graph inside a density term."""
-    return f"d({g.n}v/{g.k}u, {len(g.edges)}e)"
+    """Density notation for a graph inside a density term.
+
+    Uses the graph's repr so the target is identified unambiguously in prose,
+    without relying on positional ordering elsewhere in the output.
+    """
+    return f"d(H, {g!r})"
 
 
 def _format_density_expr(expr: "DensityExpr") -> str:
@@ -513,7 +525,7 @@ def html_unlabeled_expr(u: "UnlabeledExpr") -> str:
 def explain_aux_constraint(c: "AuxiliaryConstraint") -> str:
     formula = _format_unlabeled_expr(c.expr)
     return "\n".join([
-        f"AuxiliaryConstraint  ⟦e⟧ {c.sense}  at grade n = {c.n},  k = {c.k}",
+        f"AuxiliaryConstraint  ⟦e⟧ {_sense_str(c.sense)}  at grade n = {c.n},  k = {c.k}",
         "",
         f"Claim:  {formula}  ≥ 0  on every admissible graphon.",
         "",
@@ -531,7 +543,7 @@ def html_aux_constraint(c: "AuxiliaryConstraint") -> str:
         f"<span style='color:#888; font-size:11px;'>"
         f"Injects a nonneg SDP variable μ ≥ 0 into the sum-of-squares identity.</span>"
     )
-    meta = f"⟦e⟧ {c.sense} · n={c.n} · k={c.k}"
+    meta = f"⟦e⟧ {_sense_str(c.sense)} · n={c.n} · k={c.k}"
     return _card("AuxiliaryConstraint", meta, body)
 
 
@@ -548,7 +560,7 @@ def explain_problem(p) -> str:
     elif isinstance(p.target, DensityExpr):
         target_desc = f"density functional  {_format_density_expr(p.target)}"
     else:
-        target_desc = f"induced density of {p.target}"
+        target_desc = f"induced density of {p.target!r}"
 
     lines = [
         f"FlagProblem  ({bound_kind} on {target_desc})",
@@ -578,7 +590,7 @@ def explain_problem(p) -> str:
         for coef, g in p.target.terms:
             lines.append(f"  {coef}  ·  d(H, {g})")
     elif p.target is not None:
-        lines += ["", f"Target: {p.target}"]
+        lines += ["", f"Target: {p.target!r}"]
 
     if p.aux_constraints:
         lines += [
@@ -587,7 +599,7 @@ def explain_problem(p) -> str:
         ]
         for idx, c in enumerate(p.aux_constraints):
             lines.append(
-                f"  [{idx}]  ⟦e⟧ {c.sense}  at grade n={c.n}, "
+                f"  [{idx}]  ⟦e⟧ {_sense_str(c.sense)}  at grade n={c.n}, "
                 f"{len(c.expr.terms)} basis term{'s' if len(c.expr.terms) != 1 else ''}"
             )
         lines += [
@@ -636,7 +648,7 @@ def html_problem(p) -> str:
     aux_html = ""
     if p.aux_constraints:
         items = "".join(
-            f"<li>⟦e⟧ {c.sense} at grade n={c.n}, "
+            f"<li>⟦e⟧ {_sense_str(c.sense)} at grade n={c.n}, "
             f"{len(c.expr.terms)} term{'s' if len(c.expr.terms) != 1 else ''}</li>"
             for c in p.aux_constraints
         )
@@ -666,6 +678,7 @@ def explain_data(d) -> str:
     dens_floats = [float(x) for x in d.densities]
     dmin = min(dens_floats) if dens_floats else 0.0
     dmax = max(dens_floats) if dens_floats else 0.0
+    lhs = "density(H) − bound" if d.problem.minimize else "bound − density(H)"
 
     lines = [
         "FlagAlgebraData  (pre-SDP combinatorial data)",
@@ -678,7 +691,7 @@ def explain_data(d) -> str:
         "This is the input to the SDP solver. The solver searches for PSD",
         "matrices Q_σ (one per type σ) satisfying, for every admissible H:",
         "",
-        "  bound − density(H)  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)",
+        f"  {lhs}  =  Σ_σ ⟨Q_σ, P_σ(H)⟩  +  slack(H)",
         "",
         "The PSD matrices Q_σ define a flag-algebra sum-of-squares expression.",
         "Together with the verified coefficient inequalities over admissible",
@@ -729,25 +742,44 @@ def html_data(d) -> str:
 # ---------------------------------------------------------------------------
 
 def explain_result(r) -> str:
+    from .types import DensityExpr
     bound_kind = "lower" if r.problem.minimize else "upper"
     ineq = "≥" if r.problem.minimize else "≤"
-    density_name = "edge density" if r.problem.target is None else "target density"
     kind = "graph" if r.problem.k == 2 else f"{r.problem.k}-uniform hypergraph"
+
+    # Concrete identification of the density being bounded — no positional
+    # references, so the claim stands on its own.
+    if r.problem.target is None:
+        density_desc = "edge density"
+    elif isinstance(r.problem.target, DensityExpr):
+        density_desc = f"density {_format_density_expr(r.problem.target)}"
+    else:
+        density_desc = f"induced density of {r.problem.target!r}"
+
+    # Prefer the exact bound when certify() has stored one; the float is the
+    # approximation, not the mathematical claim.
+    if r.bound_exact is not None:
+        bound_header = f"{r.bound_exact}  ≈  {float(r.bound_exact):.8f}"
+        claim_bound = f"{r.bound_exact}"
+    else:
+        bound_header = f"{r.bound:.8f}"
+        claim_bound = f"{r.bound:.6f}"
 
     # Proof claim in plain language.
     n_forb = len(r.problem.forbidden) + len(r.problem.forbidden_induced)
     if n_forb:
+        forb_word = "pattern" if n_forb == 1 else "patterns"
         claim = (
-            f"Every {kind} avoiding the {n_forb} forbidden pattern(s) "
-            f"has {density_name} {ineq} {r.bound:.6f}."
+            f"Every {kind} avoiding the {n_forb} forbidden {forb_word} "
+            f"has {density_desc} {ineq} {claim_bound}."
         )
     else:
-        claim = f"Every admissible {kind} has {density_name} {ineq} {r.bound:.6f}."
+        claim = f"Every admissible {kind} has {density_desc} {ineq} {claim_bound}."
 
     lines = [
         "FlagAlgebraResult",
         "",
-        f"  Bound  : {r.bound:.8f}  ({bound_kind} bound)",
+        f"  Bound  : {bound_header}  ({bound_kind} bound)",
         f"  Status : {r.status}",
         "",
         f"Proof claim: {claim}",
