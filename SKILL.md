@@ -32,6 +32,7 @@ Map a natural-language problem statement to one of these shapes.
 | "Optimize a rational combination of densities"    | k   | `DensityExpr([...])`          | `[F]`            | Use `Fraction` coefficients; floats are rejected. |
 | "Prove a bound tighter than the raw SDP"          | any | any                           | any              | Add `AuxiliaryConstraint(unlabel(e * e))` for a flag-algebra element `e`; the SDP will pick nonneg weights μ_j. |
 | "Lower bound on density" (rather than upper)      | any | any                           | any              | Set `minimize=True`. |
+| "Export the certificate to a Lean proof"          | 2   | `None` or single `Hypergraph` | single `[F]`     | Produce an exact-bound `Certificate` via `certify_at_bound(data, expected_bound)`, then `zaszlo.export.lean.write_flagmatic_certificate(cert, path)`. Consumed by the `flag_certificate` tactic of Jeong et al.'s `lean-flag-algebras-release` (arXiv:2607.23500; Apache-2.0). Envelope: k=2, maximize, single forbidden pattern, no aux constraints, n ≤ 9. |
 
 ## Recommended workflow
 
@@ -131,6 +132,32 @@ result.diagnose()                       # structured DiagnosticReport
 result.to_dict(); result.to_json()      # machine-readable serialization
 result.certificate.to_json()            # exact rational proof certificate
 ```
+
+## Exporting to Lean
+
+For the four corpus entries with an assigned `lean_slug` (`mantel`, `turan_k4`, `turan_k5`, `pentagon_c5_density`), the exact-bound `Certificate` can be handed off to Jeong et al.'s Lean 4 formalization:
+
+```python
+from zaszlo import corpus
+from zaszlo.pipeline import build_flag_algebra_data
+from zaszlo.sdp import certify_at_bound
+from zaszlo.export.lean import write_flagmatic_certificate
+
+entry = corpus.get("mantel")
+# Use lean_problem_factory when set — some entries need a different
+# type_order for Lean export (the tactic rejects empty-type blocks).
+lean_factory = entry.lean_problem_factory or entry.problem_factory
+data  = build_flag_algebra_data(lean_factory())
+cert  = certify_at_bound(data, entry.expected_bound)
+
+write_flagmatic_certificate(
+    cert, f"LeanFlagAlgebras/Flagmatic/Certificates/{entry.lean_slug}.json"
+)
+```
+
+The Lean tactic (`flag_certificate` in `taeyool/lean-flag-algebras-release`) reads the JSON at elaboration time, does exact LDLᵀ on each block, and synthesizes an axiom-free proof of the density bound stated in the corresponding `<Name>.lean` file. Mismatches (wrong bound, wrong forbidden pattern) surface as elaboration errors rather than silent unsoundness. If the export is outside the tactic's envelope, `write_flagmatic_certificate` raises `LeanExportError` with a message naming the offending field.
+
+**Lean export constraint — no empty-type blocks.** The `flag_certificate` tactic only handles blocks with non-empty types (type_size ≥ 1). In k=2 problems, even `type_order` values always generate an empty-type block (σ = ∅, encoded as `"0:"` in Flagmatic); odd `type_order` values do not. Entries whose corpus `type_order` is even (`mantel` at type_order=2, `turan_k5` at type_order=4) carry a `lean_problem_factory` that re-parameterizes to an odd type_order. Passing a cert with an empty-type block to `write_flagmatic_certificate` raises `LeanExportError` describing the fix.
 
 ## Where to look next
 

@@ -53,6 +53,21 @@ class CorpusEntry:
     notes:
         Free-text notes: what the extremal construction is, tolerance caveats,
         common variations, references to related entries.
+    lean_slug:
+        For entries whose bound is proved in the taeyool
+        ``lean-flag-algebras-release`` Lean 4 library, the base filename of
+        the corresponding Flagmatic certificate JSON under
+        ``LeanFlagAlgebras/Flagmatic/Certificates/`` (e.g. ``"Mantel_cert"``).
+        ``None`` when no matching Lean case study exists.
+    lean_problem_factory:
+        If set, use this factory instead of ``problem_factory`` when generating
+        a certificate for Lean export. The taeyool ``flag_certificate`` tactic
+        requires all SDP blocks to have a non-empty type (type_size ≥ 1); the
+        Flagmatic empty type (σ = ∅, "0:") is not supported. This means k=2
+        problems with an even type_order need a different parameterization for
+        Lean export (even type_order always introduces an empty-type block;
+        odd type_order does not). ``None`` when ``problem_factory`` already
+        produces a Lean-compatible certificate.
     """
 
     slug: str
@@ -63,6 +78,8 @@ class CorpusEntry:
     problem_factory: Callable[[], FlagProblem]
     expected_bound: Fraction
     notes: str
+    lean_slug: str | None = None
+    lean_problem_factory: Callable[[], FlagProblem] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +90,22 @@ def _mantel() -> FlagProblem:
     return FlagProblem(4, 2, 2, forbidden=[complete(3)])
 
 
+def _mantel_lean() -> FlagProblem:
+    # type_order=2 (even) introduces an empty-type block; use type_order=1.
+    return FlagProblem(3, 1, 2, forbidden=[complete(3)])
+
+
 def _turan_k4() -> FlagProblem:
     return FlagProblem(5, 3, 2, forbidden=[complete(4)])
 
 
 def _turan_k5() -> FlagProblem:
     return FlagProblem(6, 4, 2, forbidden=[complete(5)])
+
+
+def _turan_k5_lean() -> FlagProblem:
+    # type_order=4 (even) introduces an empty-type block; use type_order=3.
+    return FlagProblem(5, 3, 2, forbidden=[complete(5)])
 
 
 def _pentagon_c5() -> FlagProblem:
@@ -151,6 +178,8 @@ ALL_ENTRIES: tuple[CorpusEntry, ...] = (
             "balanced bipartite graphon; sharp graphs at n=4 include the "
             "empty graph, the 3-edge path/matching, and K₂,₂."
         ),
+        lean_slug="Mantel_cert",
+        lean_problem_factory=_mantel_lean,
     ),
     CorpusEntry(
         slug="turan_k4",
@@ -164,6 +193,7 @@ ALL_ENTRIES: tuple[CorpusEntry, ...] = (
         problem_factory=_turan_k4,
         expected_bound=Fraction(2, 3),
         notes="The Turán density of Kₖ is (k−2)/(k−1); this is k=4 giving 2/3.",
+        lean_slug="K4freeEdge_cert",
     ),
     CorpusEntry(
         slug="turan_k5",
@@ -180,6 +210,8 @@ ALL_ENTRIES: tuple[CorpusEntry, ...] = (
             "n=6, type_order=4 for a tight bound. Numerical solve returns 0.75 "
             "cleanly."
         ),
+        lean_slug="K5freeEdge_cert",
+        lean_problem_factory=_turan_k5_lean,
     ),
     CorpusEntry(
         slug="pentagon_c5_density",
@@ -197,6 +229,7 @@ ALL_ENTRIES: tuple[CorpusEntry, ...] = (
             "Requires n=5, type_order=3 for the tight bound. In a triangle-"
             "free graph every C₅ is automatically induced."
         ),
+        lean_slug="ErdosPentagon_cert",
     ),
     CorpusEntry(
         slug="k4_minus_free_3graphs",
