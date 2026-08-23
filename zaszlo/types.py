@@ -1327,12 +1327,70 @@ class SharpsResult:
 # Certificate
 # ---------------------------------------------------------------------------
 
+@dataclass
+class CertificateProvenance:
+    """Record of how a :class:`Certificate` was produced.
+
+    Populated by the certifier that built the certificate so that consumers
+    (users, agents, JSON roundtrips) can inspect the pipeline that produced
+    the object without re-running it.  Every field is optional; only the
+    fields the producing pipeline knows about are set.
+
+    Attributes
+    ----------
+    pipeline:
+        Which entry point produced this certificate: ``'certify'`` (Cholesky
+        rounding of a solved SDP) or ``'certify_at_bound'`` (kernel + rational
+        correction at a user-supplied exact bound).
+    denom_limit:
+        Maximum denominator used during rationalisation (for either pipeline).
+    chol_reg:
+        Cholesky regularisation used by :func:`certify` (None for
+        ``certify_at_bound``).
+    feasibility_status:
+        For ``certify_at_bound``: the Clarabel status of the fixed-λ
+        feasibility solve (``'optimal'``, ``'infeasible'``, …).
+    kernel_dims:
+        For ``certify_at_bound``: dimension of the rational kernel identified
+        in each Q_σ (one entry per type).
+    correction:
+        For ``certify_at_bound``: the ``info`` dict returned by
+        :func:`_correct_T_for_sharp_graphs` — ``consistent``, ``rank``,
+        ``float_rank``, ``dropped_rows``, ``num_sharp``, ``num_vars``,
+        ``max_correction`` (formatted as ``"num/den"`` string).
+    psd_safeguard:
+        For ``certify_at_bound``: outcome of the post-correction PSD check —
+        ``'not_run'``, ``'passed'``, ``'tripped_correction_discarded'``.
+    reason:
+        On any invalid path, a short human-readable explanation of what went
+        wrong (e.g. ``"feasibility solve returned infeasible"``).
+    """
+
+    pipeline: Optional[str] = None
+    denom_limit: Optional[int] = None
+    chol_reg: Optional[float] = None
+    feasibility_status: Optional[str] = None
+    kernel_dims: Optional[list[int]] = None
+    correction: Optional[dict] = None
+    psd_safeguard: Optional[str] = None
+    reason: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        """JSON-ready dict of this provenance record.  Empty values are dropped."""
+        out: dict = {}
+        for k, v in self.__dict__.items():
+            if v is None:
+                continue
+            out[k] = v
+        return out
+
+
 class Certificate:
     """Exact rational certificate for a flag algebra bound.
 
-    Produced by :func:`certify`. Consolidates the rounded PSD matrices,
-    exact certified bound, per-graph residuals, and validity status in one
-    object.
+    Produced by :func:`certify` or :func:`certify_at_bound`. Consolidates the
+    rounded PSD matrices, exact certified bound, per-graph residuals, and
+    validity status in one object.
 
     Attributes
     ----------
@@ -1348,6 +1406,11 @@ class Certificate:
         Exact rational residual for each admissible graph.
     data:
         The originating FlagAlgebraData; used by explain() to name graphs.
+    provenance:
+        :class:`CertificateProvenance` describing how this certificate was
+        produced.  Never ``None``; a bare Certificate constructed by hand has
+        an empty-fielded provenance.  Surfaced by ``explain()`` and
+        ``diagnose()``.
 
     Properties
     ----------
@@ -1366,6 +1429,7 @@ class Certificate:
         residuals: list[Fraction],
         data: Optional["FlagAlgebraData"] = None,
         mu: Optional[list[Fraction]] = None,
+        provenance: Optional["CertificateProvenance"] = None,
     ):
         self.problem = problem
         self.bound = bound
@@ -1377,6 +1441,9 @@ class Certificate:
         # has no aux constraints; otherwise mu[j] is the certified weight on
         # ⟦e_j⟧ ≥ 0 that appears in the residual identity.
         self.mu: list[Fraction] = list(mu) if mu is not None else []
+        self.provenance: CertificateProvenance = (
+            provenance if provenance is not None else CertificateProvenance()
+        )
 
     @property
     def active_constraints(self) -> list[int]:

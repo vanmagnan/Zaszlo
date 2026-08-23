@@ -137,6 +137,7 @@ def certificate_to_dict(c: "Certificate") -> dict[str, Any]:
     Includes the full rational Q matrices and per-graph residuals.  For very
     large certificates the payload can be substantial — filter downstream if
     only the summary fields (bound, valid, active_constraints) are needed.
+    The ``provenance`` field records how the certificate was produced.
     """
     problem = encode_problem(c.problem)
     admissible = c.data.admissible if c.data is not None else None
@@ -156,6 +157,7 @@ def certificate_to_dict(c: "Certificate") -> dict[str, Any]:
             [encode_hypergraph(H) for H in admissible]
             if admissible is not None else None
         ),
+        "provenance": c.provenance.to_dict(),
     }
 
 

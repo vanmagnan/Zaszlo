@@ -20,6 +20,7 @@ from zaszlo import (
     Hypergraph,
     build_flag_algebra_data,
     certify,
+    certify_at_bound,
     complete,
     identify_sharps,
     round_certificate,
@@ -648,3 +649,198 @@ class TestAuxConstraintSquareOfDifference:
 
     def test_mu_nonneg(self, solved):
         assert all(m >= 0 for m in solved.certificate.mu)
+
+
+# ---------------------------------------------------------------------------
+# certify_at_bound(): Cohn–de Laat–Leijenhorst pipeline
+# ---------------------------------------------------------------------------
+
+class TestCertifyAtBound:
+    """certify_at_bound must return an exact Certificate at the user-supplied
+    Fraction bound, valid in exact rational arithmetic.
+
+    The primary test is Mantel's theorem: max edge density in triangle-free
+    4-vertex graphs = exactly 1/2.  Standard certify() cannot reach Fraction(1,2)
+    because Cholesky rounding always overshoots; this pipeline must hit it exactly.
+    """
+
+    @pytest.fixture(scope="class")
+    def mantel_data(self):
+        k3 = Hypergraph(3, 2, [(1, 2), (1, 3), (2, 3)])
+        prob = FlagProblem(4, 2, 2, forbidden=[k3], minimize=False)
+        return build_flag_algebra_data(prob)
+
+    @pytest.fixture(scope="class")
+    def mantel_cert(self, mantel_data):
+        return certify_at_bound(mantel_data, Fraction(1, 2))
+
+    # --- core correctness ---
+
+    def test_returns_certificate(self, mantel_cert):
+        assert isinstance(mantel_cert, Certificate)
+
+    def test_bound_is_exactly_half(self, mantel_cert):
+        assert mantel_cert.bound == Fraction(1, 2)
+
+    def test_bound_is_fraction(self, mantel_cert):
+        assert isinstance(mantel_cert.bound, Fraction)
+
+    def test_valid(self, mantel_cert):
+        assert mantel_cert.valid is True
+
+    def test_residuals_all_nonneg(self, mantel_cert):
+        assert all(r >= 0 for r in mantel_cert.residuals)
+
+    def test_residuals_are_fractions(self, mantel_cert):
+        assert all(isinstance(r, Fraction) for r in mantel_cert.residuals)
+
+    def test_residuals_count(self, mantel_cert, mantel_data):
+        assert len(mantel_cert.residuals) == len(mantel_data.admissible)
+
+    def test_q_matrices_present(self, mantel_cert):
+        assert mantel_cert.Q is not None
+        assert len(mantel_cert.Q) == 3  # Mantel has 3 types
+
+    def test_active_constraints_have_zero_residual(self, mantel_cert):
+        ac = mantel_cert.active_constraints
+        assert len(ac) > 0
+        for i in ac:
+            assert mantel_cert.residuals[i] == Fraction(0)
+
+    # --- exact bound vs certify() ---
+
+    def test_exact_bound_unreachable_by_certify(self, mantel_data):
+        # Confirm the motivation: certify() cannot reach Fraction(1, 2) exactly.
+        from zaszlo import solve_sdp
+        result = solve_sdp(mantel_data, extract_Q=True)
+        proof = certify(result)
+        assert proof.bound != Fraction(1, 2)
+
+    # --- Turán's theorem: max edge density in K4-free graphs = 2/3 ---
+
+    @pytest.fixture(scope="class")
+    def turan_data(self):
+        prob = FlagProblem(5, 3, 2, forbidden=[complete(4)], minimize=False)
+        return build_flag_algebra_data(prob)
+
+    @pytest.fixture(scope="class")
+    def turan_cert(self, turan_data):
+        return certify_at_bound(turan_data, Fraction(2, 3))
+
+    def test_turan_bound_exact(self, turan_cert):
+        assert turan_cert.bound == Fraction(2, 3)
+
+    def test_turan_valid(self, turan_cert):
+        assert turan_cert.valid is True
+
+    def test_turan_residuals_nonneg(self, turan_cert):
+        assert all(r >= 0 for r in turan_cert.residuals)
+
+    # --- type validation ---
+
+    def test_raises_on_non_fraction_bound(self, mantel_data):
+        with pytest.raises(TypeError):
+            certify_at_bound(mantel_data, 0.5)
+
+    def test_raises_on_int_bound(self, mantel_data):
+        with pytest.raises(TypeError):
+            certify_at_bound(mantel_data, 1)
+
+    # --- infeasible bound returns invalid certificate ---
+
+    def test_infeasible_bound_returns_invalid(self, mantel_data):
+        # Fraction(1, 3) is below the Mantel optimum; the feasibility SDP is
+        # infeasible (no Q certifies a bound that tight for triangle-free graphs).
+        cert = certify_at_bound(mantel_data, Fraction(1, 3))
+        assert isinstance(cert, Certificate)
+        assert cert.valid is False
+
+    # --- aux constraints: μ carried through correctly ---
+
+    def test_aux_constraint_problem(self):
+        from zaszlo import Flag
+        from zaszlo.algebra import unlabel
+        from zaszlo.generation import generate_flags
+
+        K3 = complete(3)
+        sigma_empty = Flag(Hypergraph(0, 2, []), 0)
+        f = generate_flags(2, sigma_empty, [], [])[0]
+        aux_expr = unlabel(f * f)
+
+        prob = FlagProblem(4, 2, 2, forbidden=[K3])
+        prob.add_constraint(aux_expr)
+        data = build_flag_algebra_data(prob)
+        cert = certify_at_bound(data, Fraction(1, 2))
+        assert cert.valid is True
+
+    # --- provenance: pipeline records how the certificate was produced ---
+
+    def test_provenance_pipeline_certify_at_bound(self, mantel_cert):
+        assert mantel_cert.provenance.pipeline == "certify_at_bound"
+
+    def test_provenance_denominator_limit(self, mantel_cert):
+        assert mantel_cert.provenance.denom_limit == 1000
+
+    def test_provenance_feasibility_status_optimal(self, mantel_cert):
+        assert mantel_cert.provenance.feasibility_status == "optimal"
+
+    def test_provenance_kernel_dims_recorded(self, mantel_cert):
+        # Mantel has three types, each with a 1-dimensional kernel at the optimum.
+        assert mantel_cert.provenance.kernel_dims == [1, 1, 1]
+
+    def test_provenance_correction_reports_rank(self, mantel_cert):
+        corr = mantel_cert.provenance.correction
+        assert corr is not None
+        assert corr["num_sharp"] == 3
+        assert corr["rank"] == 2  # Mantel: 3 sharp constraints, only 2 independent
+        assert corr["float_rank"] == 2
+        assert corr["applied"] is True
+
+    def test_provenance_psd_safeguard_passed(self, mantel_cert):
+        assert mantel_cert.provenance.psd_safeguard == "passed"
+
+    def test_provenance_no_reason_when_valid(self, mantel_cert):
+        assert mantel_cert.provenance.reason is None
+
+    def test_provenance_infeasible_bound_surfaces_reason(self, mantel_data):
+        # Bound tighter than what the SDP can achieve → feasibility solve is
+        # infeasible; provenance must surface the Clarabel status and a reason.
+        cert = certify_at_bound(mantel_data, Fraction(1, 3))
+        assert cert.valid is False
+        assert cert.provenance.pipeline == "certify_at_bound"
+        assert cert.provenance.feasibility_status == "infeasible"
+        assert cert.provenance.reason is not None
+        assert "infeasible" in cert.provenance.reason.lower()
+
+    def test_provenance_certify_pipeline_tag(self, mantel_data):
+        # certify() (Cholesky pipeline) must also record its provenance.
+        from zaszlo import solve_sdp
+
+        result = solve_sdp(mantel_data, extract_Q=True)
+        cert = certify(result)
+        assert cert.provenance.pipeline == "certify"
+        assert cert.provenance.denom_limit == 1000
+        assert cert.provenance.chol_reg == 1e-10
+
+    def test_provenance_survives_to_dict(self, mantel_cert):
+        d = mantel_cert.to_dict()
+        assert "provenance" in d
+        assert d["provenance"]["pipeline"] == "certify_at_bound"
+        assert d["provenance"]["feasibility_status"] == "optimal"
+        assert d["provenance"]["kernel_dims"] == [1, 1, 1]
+
+    def test_diagnostic_report_includes_provenance(self, mantel_cert):
+        report = mantel_cert.diagnose()
+        assert report.provenance["pipeline"] == "certify_at_bound"
+        assert report.provenance["feasibility_status"] == "optimal"
+
+    def test_explain_mentions_provenance(self, mantel_cert):
+        text = mantel_cert.explain()
+        assert "How this was produced" in text
+        assert "certify_at_bound" in text
+
+    def test_explain_mentions_reason_when_invalid(self, mantel_data):
+        cert = certify_at_bound(mantel_data, Fraction(1, 3))
+        text = cert.explain()
+        assert "Why invalid" in text
+        assert "infeasible" in text.lower()

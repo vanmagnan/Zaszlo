@@ -1077,6 +1077,37 @@ def explain_certificate(c: "Certificate") -> str:
         if c.data is not None:
             lines.append(f"  Worst graph      : {c.data.admissible[worst]}")
 
+    # --- Provenance: how this certificate was produced ---
+    prov = c.provenance
+    if prov.pipeline is not None:
+        lines += ["", "How this was produced:"]
+        lines.append(f"  Pipeline           : {prov.pipeline}")
+        if prov.denom_limit is not None:
+            lines.append(f"  Denominator limit  : {prov.denom_limit}")
+        if prov.chol_reg is not None:
+            lines.append(f"  Cholesky reg       : {prov.chol_reg}")
+        if prov.feasibility_status is not None:
+            lines.append(f"  Feasibility solve  : {prov.feasibility_status}")
+        if prov.kernel_dims is not None:
+            lines.append(f"  Q_σ kernel dims    : {prov.kernel_dims}")
+        if prov.correction is not None:
+            corr = prov.correction
+            lines.append(
+                f"  Rational correction: rank {corr['rank']}/{corr['num_sharp']} "
+                f"(float rank {corr['float_rank']}), "
+                f"max δT = {corr['max_correction']}, "
+                f"applied = {corr['applied']}"
+            )
+            if corr.get("dropped_rows"):
+                lines.append(
+                    f"                       dropped sharp rows "
+                    f"{corr['dropped_rows']} (linearly dependent)"
+                )
+        if prov.psd_safeguard is not None:
+            lines.append(f"  PSD safeguard      : {prov.psd_safeguard}")
+    if prov.reason is not None:
+        lines += ["", f"Why invalid: {prov.reason}"]
+
     return "\n".join(lines)
 
 
@@ -1111,4 +1142,37 @@ def html_certificate(c: "Certificate") -> str:
         f"Q matrices: {len(c.Q)} ({q_sizes})</div>"
         f"<b>Active constraints</b> ({len(ac)}):{_graph_items(ac)}"
     )
+
+    prov = c.provenance
+    if prov.pipeline is not None:
+        prov_items: list[str] = [f"<li>pipeline: <code>{prov.pipeline}</code></li>"]
+        if prov.denom_limit is not None:
+            prov_items.append(f"<li>denominator limit: {prov.denom_limit}</li>")
+        if prov.feasibility_status is not None:
+            prov_items.append(f"<li>feasibility solve: {prov.feasibility_status}</li>")
+        if prov.kernel_dims is not None:
+            prov_items.append(f"<li>Q<sub>σ</sub> kernel dims: {prov.kernel_dims}</li>")
+        if prov.correction is not None:
+            corr = prov.correction
+            drop = ""
+            if corr.get("dropped_rows"):
+                drop = f", dropped rows {corr['dropped_rows']}"
+            prov_items.append(
+                f"<li>correction: rank {corr['rank']}/{corr['num_sharp']} "
+                f"(float rank {corr['float_rank']}), max δT = "
+                f"<code>{corr['max_correction']}</code>, applied = {corr['applied']}"
+                f"{drop}</li>"
+            )
+        if prov.psd_safeguard is not None:
+            prov_items.append(f"<li>PSD safeguard: {prov.psd_safeguard}</li>")
+        body += (
+            "<div style='margin-top:8px;'><b>Provenance</b>"
+            f"<ul style='margin:2px 0 2px 16px;'>{''.join(prov_items)}</ul></div>"
+        )
+    if prov.reason is not None:
+        body += (
+            f"<div style='margin-top:6px; color:{valid_color}; font-size:12px;'>"
+            f"<b>Why invalid:</b> {prov.reason}</div>"
+        )
+
     return _card("Certificate", f"k={c.problem.k}, n={c.problem.n}", body)

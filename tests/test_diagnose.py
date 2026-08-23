@@ -68,6 +68,7 @@ class TestFieldPresence:
             "max_sharp_density_matches_bound",
             "aux_summary", "Q_summary",
             "min_residual", "worst_residual_index",
+            "provenance",
         }
         assert set(d.to_dict().keys()) == expected
 

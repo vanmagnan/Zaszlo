@@ -92,6 +92,11 @@ class DiagnosticReport:
     min_residual, worst_residual_index:
         Minimum residual across admissible graphs (as "num/den" string) and
         its index.  None if no residuals available.
+    provenance:
+        For Certificates: a dict of how the certificate was produced (pipeline,
+        denom_limit, feasibility_status, kernel_dims, correction, etc.).  See
+        :class:`zaszlo.types.CertificateProvenance`.  Empty dict when the
+        source is a FlagAlgebraResult without an attached certificate.
     """
 
     kind: str
@@ -112,6 +117,7 @@ class DiagnosticReport:
     Q_summary: list[dict[str, Any]]
     min_residual: Optional[str]
     worst_residual_index: Optional[int]
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Return this report as a plain dict (JSON-ready)."""
@@ -177,6 +183,25 @@ class DiagnosticReport:
                 f"  Min residual        : {self.min_residual} "
                 f"(at graph index {self.worst_residual_index})",
             ]
+        if self.provenance:
+            lines += ["", "  Certificate provenance:"]
+            for key in (
+                "pipeline", "denom_limit", "chol_reg", "feasibility_status",
+                "kernel_dims", "psd_safeguard", "reason",
+            ):
+                if key in self.provenance:
+                    lines.append(f"    {key:<19}: {self.provenance[key]}")
+            corr = self.provenance.get("correction")
+            if corr:
+                lines.append(
+                    f"    {'correction':<19}: rank {corr['rank']}/{corr['num_sharp']} "
+                    f"(float rank {corr['float_rank']}), "
+                    f"max δT = {corr['max_correction']}, applied = {corr['applied']}"
+                )
+                if corr.get("dropped_rows"):
+                    lines.append(
+                        f"    {'  dropped rows':<19}: {corr['dropped_rows']}"
+                    )
         return "\n".join(lines)
 
 
@@ -284,6 +309,10 @@ def diagnose_result(r: "FlagAlgebraResult") -> DiagnosticReport:
         worst_idx = min(range(len(residuals_frac)), key=lambda i: residuals_frac[i])
         min_res_str = _rat_str(residuals_frac[worst_idx])
 
+    provenance = (
+        r.certificate.provenance.to_dict()
+        if r.certificate is not None else {}
+    )
     common = _extract_common_fields(r.problem, r.data)
     return DiagnosticReport(
         kind="FlagAlgebraResult",
@@ -304,6 +333,7 @@ def diagnose_result(r: "FlagAlgebraResult") -> DiagnosticReport:
         Q_summary=Q_sum,
         min_residual=min_res_str,
         worst_residual_index=worst_idx,
+        provenance=provenance,
     )
 
 
@@ -370,4 +400,5 @@ def diagnose_certificate(c: "Certificate") -> DiagnosticReport:
         Q_summary=Q_sum,
         min_residual=min_res_str,
         worst_residual_index=worst_idx,
+        provenance=c.provenance.to_dict(),
     )

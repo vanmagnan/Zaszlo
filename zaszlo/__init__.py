@@ -45,6 +45,7 @@ from .types import (
     FlagAlgebraResult,
     SharpsResult,
     Certificate,
+    CertificateProvenance,
     CertificationError,
     DensityExpr,
     FlagAlgebraElement,
@@ -56,7 +57,7 @@ from .types import (
     f32,
 )
 from .pipeline import build_flag_algebra_data
-from .sdp import build_sdp, solve_sdp, verify_certificate, identify_sharps, round_certificate, certify
+from .sdp import build_sdp, solve_sdp, verify_certificate, identify_sharps, round_certificate, certify, certify_at_bound
 from .algebra import flag_product, unlabel, lift_to
 from .api import solve
 from .diagnose import DiagnosticReport
@@ -73,6 +74,7 @@ __all__ = [
     "FlagAlgebraResult",
     "SharpsResult",
     "Certificate",
+    "CertificateProvenance",
     "DensityExpr",
     "FlagAlgebraElement",
     "UnlabeledExpr",
@@ -92,6 +94,7 @@ __all__ = [
     "identify_sharps",
     "round_certificate",
     "certify",
+    "certify_at_bound",
     # Flag algebra kernel
     "flag_product",
     "unlabel",
